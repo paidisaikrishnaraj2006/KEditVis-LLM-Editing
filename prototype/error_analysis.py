@@ -27,7 +27,9 @@ def summarize_fact(fact_result):
         raise ValueError("A fact summary requires measured baseline signals.")
     cos_sims = [abs(l["cosine_similarity"]) for l in signals]
     if any(not math.isfinite(value) or value > 1.000001 for value in cos_sims):
-        raise ValueError("Cosine similarities must be finite and lie in [-1, 1] within float32 tolerance.")
+        raise ValueError(
+            "Cosine similarities must be finite and lie in [-1, 1] within float32 tolerance."
+        )
     mean_cos = sum(cos_sims) / len(cos_sims)
 
     target_new = fact_result["fact"]["target_new"].strip().lower()
@@ -44,7 +46,9 @@ def summarize_fact(fact_result):
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: python error_analysis.py <audit/development/batch_comparison.json>")
+        print(
+            "Usage: python error_analysis.py <audit/development/batch_comparison.json>"
+        )
         sys.exit(1)
 
     with open(sys.argv[1]) as f:
@@ -60,27 +64,45 @@ def main():
         s = summarize_fact(fr)
         summaries[prompt_str] = s
         print(f"{prompt_str!r} -> {fr['fact']['target_new']!r}")
-        print(f"  mean|cos_sim| ({s['n_layers']} recorded layers): {s['mean_abs_cos_sim_all_layers']:.3f}")
+        print(
+            f"  mean|cos_sim| ({s['n_layers']} recorded layers): {s['mean_abs_cos_sim_all_layers']:.3f}"
+        )
         print(f"  min|cos_sim|:                  {s['min_abs_cos_sim']:.3f}")
         print(f"  max|cos_sim|:                  {s['max_abs_cos_sim']:.3f}")
-        print(f"  layers where target_new appears in top-5 (pre-edit): "
-              f"{s['layers_with_target_in_top5'] or 'NONE'}")
+        print(
+            f"  layers where target_new appears in top-5 (pre-edit): "
+            f"{s['layers_with_target_in_top5'] or 'NONE'}"
+        )
         print()
 
-    print("\n=== Focused comparison: Windows->Apple (failed) vs Mario Kart->Apple (succeeded) ===")
-    print("The shared target does not isolate subject representation from other differences.\n")
+    print(
+        "\n=== Focused comparison: Windows->Apple (failed) vs Mario Kart->Apple (succeeded) ==="
+    )
+    print(
+        "The shared target does not isolate subject representation from other differences.\n"
+    )
 
     windows_key = next((k for k in by_prompt if "Windows" in k), None)
     mario_key = next((k for k in by_prompt if "Mario Kart" in k), None)
 
     if windows_key and mario_key:
         w, m = summaries[windows_key], summaries[mario_key]
-        print(f"{'Metric':<35} | {'Windows (failed)':>18} | {'Mario Kart (succeeded)':>24}")
+        print(
+            f"{'Metric':<35} | {'Windows (failed)':>18} | {'Mario Kart (succeeded)':>24}"
+        )
         print("-" * 82)
-        print(f"{'mean|cos_sim| (all layers)':<35} | {w['mean_abs_cos_sim_all_layers']:>18.3f} | {m['mean_abs_cos_sim_all_layers']:>24.3f}")
-        print(f"{'min|cos_sim|':<35} | {w['min_abs_cos_sim']:>18.3f} | {m['min_abs_cos_sim']:>24.3f}")
-        print(f"{'max|cos_sim|':<35} | {w['max_abs_cos_sim']:>18.3f} | {m['max_abs_cos_sim']:>24.3f}")
-        print(f"{'# layers with target in top-5':<35} | {len(w['layers_with_target_in_top5']):>18} | {len(m['layers_with_target_in_top5']):>24}")
+        print(
+            f"{'mean|cos_sim| (all layers)':<35} | {w['mean_abs_cos_sim_all_layers']:>18.3f} | {m['mean_abs_cos_sim_all_layers']:>24.3f}"
+        )
+        print(
+            f"{'min|cos_sim|':<35} | {w['min_abs_cos_sim']:>18.3f} | {m['min_abs_cos_sim']:>24.3f}"
+        )
+        print(
+            f"{'max|cos_sim|':<35} | {w['max_abs_cos_sim']:>18.3f} | {m['max_abs_cos_sim']:>24.3f}"
+        )
+        print(
+            f"{'# layers with target in top-5':<35} | {len(w['layers_with_target_in_top5']):>18} | {len(m['layers_with_target_in_top5']):>24}"
+        )
 
     print(
         "\nInterpretation: cosine similarity describes direction, not the magnitude "

@@ -12,19 +12,21 @@ import argparse
 import hashlib
 import json
 import math
-from pathlib import Path
-import random
 import time
-from typing import Any, Dict, List, Optional, Tuple
 import warnings
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import requests
 import scipy
-from scipy import stats
-
-from layer_selection import get_random_scheme, get_static_preset, select_layers_telemetry
+from layer_selection import (
+    get_random_scheme,
+    get_static_preset,
+    select_layers_telemetry,
+)
 from prepare_benchmark import validate_manifest
+from scipy import stats
 
 DEFAULT_URL = "https://opzgameryt--keditvis-memit-web-app.modal.run"
 MANIFEST_PATH = Path(__file__).parent / "data" / "benchmark_manifest.json"
@@ -38,11 +40,17 @@ EVAL_DIR = Path(__file__).parent / "audit" / "evaluation"
 WILCOXON_METHOD = "approx"
 EXPERIMENT_SCHEMA = 2
 SELECTION_POLICIES = ("static", "telemetry", "random")
-OPTIMIZATION_PROFILES = ("standard", "standard_budget", "context_no_consistency", "context")
+OPTIMIZATION_PROFILES = (
+    "standard",
+    "standard_budget",
+    "context_no_consistency",
+    "context",
+)
 
 
 class ExperimentFailure(RuntimeError):
     """Carry partial observations into the failure checkpoint before stopping."""
+
     def __init__(self, message, record):
         super().__init__(message)
         self.record = record
@@ -67,7 +75,7 @@ def detect_repetition(text: str, n: int = 3, max_repeats: int = 3) -> bool:
     return False
 
 
-def load_manifest(path: Path = MANIFEST_PATH) -> Dict[str, Any]:
+def load_manifest(path: Path = MANIFEST_PATH) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         manifest = json.load(f)
     validate_manifest(manifest)
@@ -75,8 +83,8 @@ def load_manifest(path: Path = MANIFEST_PATH) -> Dict[str, Any]:
 
 
 def extract_scheme_record(
-    res_obj: Dict[str, Any], layers: List[int], label: str = "", **extra: Any
-) -> Dict[str, Any]:
+    res_obj: dict[str, Any], layers: list[int], label: str = "", **extra: Any
+) -> dict[str, Any]:
     """Flattens one scheme/profile result into a flat, comparable record.
 
     Metrics that were never computed are recorded as None rather than 0.0. A
@@ -93,8 +101,11 @@ def extract_scheme_record(
 
     def metric(name: str):
         value = metrics.get(name) if metrics else None
-        if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))
-                                  or not math.isfinite(value)):
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
             raise ValueError(f"Non-finite or non-numeric {name} metric.")
         return value
 
@@ -115,7 +126,9 @@ def extract_scheme_record(
         "frob_rel": drift.get("total_relative_frobenius"),
         "mean_layer_rel": drift.get("mean_layer_relative_frobenius"),
         "generation": generation,
-        "has_repetition": detect_repetition(generation) if generation is not None else None,
+        "has_repetition": detect_repetition(generation)
+        if generation is not None
+        else None,
         "status": res_obj.get("status", "complete"),
         "optimization_config": res_obj.get("optimization_config"),
     }
@@ -145,8 +158,12 @@ def describe_http_error(resp) -> str:
 
 
 def post_with_retry(
-    url: str, path: str, json_body: Dict[str, Any], timeout: int = 180, max_retries: int = 3
-) -> Dict[str, Any]:
+    url: str,
+    path: str,
+    json_body: dict[str, Any],
+    timeout: int = 180,
+    max_retries: int = 3,
+) -> dict[str, Any]:
     """Posts JSON to an endpoint, retrying only transient failures.
 
     A 4xx is a permanent client error -- the identical request will be rejected
@@ -162,8 +179,11 @@ def post_with_retry(
                 resp = session.post(full_url, json=json_body, timeout=timeout)
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
             last_err = f"{type(e).__name__}: {e}"
-            print(f"      [Retry {attempt}/{max_retries}] {path} transient error "
-                  f"({last_err}). Waiting 5s...", flush=True)
+            print(
+                f"      [Retry {attempt}/{max_retries}] {path} transient error "
+                f"({last_err}). Waiting 5s...",
+                flush=True,
+            )
             time.sleep(5)
             continue
 
@@ -175,20 +195,25 @@ def post_with_retry(
                 f"{describe_http_error(resp)}"
             )
         last_err = f"HTTP {resp.status_code}: {describe_http_error(resp)}"
-        print(f"      [Retry {attempt}/{max_retries}] {path} server error "
-              f"({last_err}). Waiting 5s...", flush=True)
+        print(
+            f"      [Retry {attempt}/{max_retries}] {path} server error "
+            f"({last_err}). Waiting 5s...",
+            flush=True,
+        )
         time.sleep(5)
 
-    raise RuntimeError(f"Request to {path} failed after {max_retries} attempts: {last_err}")
+    raise RuntimeError(
+        f"Request to {path} failed after {max_retries} attempts: {last_err}"
+    )
 
 
-def check_health(url: str, model: str = "gpt2-xl") -> Dict[str, Any]:
+def check_health(url: str, model: str = "gpt2-xl") -> dict[str, Any]:
     resp = requests.get(f"{url}/health?model={model}", timeout=60)
     resp.raise_for_status()
     return resp.json()
 
 
-def run_probe(url: str, fact: Dict[str, Any], model: str = "gpt2-xl") -> Dict[str, Any]:
+def run_probe(url: str, fact: dict[str, Any], model: str = "gpt2-xl") -> dict[str, Any]:
     body = {
         "model": model,
         "prompt": fact["prompt"],
@@ -207,8 +232,8 @@ def run_generate(url: str, prompt: str, subject: str, model: str = "gpt2-xl") ->
 
 
 def compute_bootstrap_ci(
-    diffs: List[float], n_resamples: int = 10000, ci: float = 0.95, seed: int = 42
-) -> Tuple[float, float]:
+    diffs: list[float], n_resamples: int = 10000, ci: float = 0.95, seed: int = 42
+) -> tuple[float, float]:
     """Computes percentile bootstrap confidence interval for the mean difference."""
     if not diffs or any(not math.isfinite(d) for d in diffs):
         raise ValueError("Bootstrap requires nonempty finite differences.")
@@ -228,8 +253,8 @@ def compute_bootstrap_ci(
 
 
 def paired_comparison(
-    a_vals: List[Optional[float]], b_vals: List[Optional[float]]
-) -> Dict[str, Any]:
+    a_vals: list[float | None], b_vals: list[float | None]
+) -> dict[str, Any]:
     """Computes paired difference statistics between condition A and condition B.
 
     Only observations present in BOTH arms are used, so a metric measured for
@@ -243,9 +268,14 @@ def paired_comparison(
             f"(got {len(a_vals)} and {len(b_vals)})."
         )
     for value in a_vals + b_vals:
-        if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))
-                                  or not math.isfinite(value)):
-            raise ValueError("Paired comparison contains a non-finite or non-numeric observation.")
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
+            raise ValueError(
+                "Paired comparison contains a non-finite or non-numeric observation."
+            )
 
     pairs = [(a, b) for a, b in zip(a_vals, b_vals) if a is not None and b is not None]
     n_pairs = len(pairs)
@@ -294,7 +324,9 @@ def paired_comparison(
                 # already disclosed in the docs, so the warning is not noise worth
                 # emitting on every metric of every run.
                 warnings.simplefilter("ignore", UserWarning)
-                w_res = stats.wilcoxon(diffs, alternative="two-sided", method=WILCOXON_METHOD)
+                w_res = stats.wilcoxon(
+                    diffs, alternative="two-sided", method=WILCOXON_METHOD
+                )
             w_stat = float(w_res.statistic)
             p_val_w = float(w_res.pvalue)
         except ValueError as exc:
@@ -332,26 +364,26 @@ def paired_comparison(
     }
 
 
-def finding_is_positive(entry: Dict[str, Any]) -> Optional[bool]:
+def finding_is_positive(entry: dict[str, Any]) -> bool | None:
     """True/False for a positive mean difference, or None when not computable."""
     diff = entry.get("mean_diff")
     return None if diff is None else diff > 0.0
 
 
-def finding_is_significant_improvement(entry: Dict[str, Any]) -> Optional[bool]:
+def finding_is_significant_improvement(entry: dict[str, Any]) -> bool | None:
     positive = finding_is_positive(entry)
     significant = entry.get("statistically_significant")
     return None if positive is None or significant is None else positive and significant
 
 
-def normalize_layers(layers: List[int]) -> List[int]:
+def normalize_layers(layers: list[int]) -> list[int]:
     """Mirrors the backend's _normalize_scheme so results can be matched to requests."""
     return sorted({int(layer) for layer in layers})
 
 
 def match_scheme_records(
-    returned: List[Dict[str, Any]], requested: Dict[str, List[int]]
-) -> Dict[str, Dict[str, Any]]:
+    returned: list[dict[str, Any]], requested: dict[str, list[int]]
+) -> dict[str, dict[str, Any]]:
     """Maps each requested policy name to the backend result for its layer window.
 
     /compare deduplicates identical schemes before evaluating them, so the
@@ -380,8 +412,8 @@ def match_scheme_records(
 
 
 def run_experiment_fact_selection(
-    fact: Dict[str, Any], url: str, model: str = "gpt2-xl"
-) -> Dict[str, Any]:
+    fact: dict[str, Any], url: str, model: str = "gpt2-xl"
+) -> dict[str, Any]:
     """Runs Experiment 1 on a single fact using /compare with 3 schemes."""
     case_id = fact["case_id"]
 
@@ -412,10 +444,15 @@ def run_experiment_fact_selection(
     }
 
     t0 = time.monotonic()
-    record = {"case_id": case_id, "subject": fact["subject"],
-              "target_new": fact["target_new"], "target_true": fact["target_true"],
-              "status": "failed", "rollback_verified": None,
-              "restoration_check": "baseline_probe_equality"}
+    record = {
+        "case_id": case_id,
+        "subject": fact["subject"],
+        "target_new": fact["target_new"],
+        "target_true": fact["target_true"],
+        "status": "failed",
+        "rollback_verified": None,
+        "restoration_check": "baseline_probe_equality",
+    }
     compare_error = None
     try:
         compare_data = post_with_retry(url, "/compare", compare_body, timeout=180)
@@ -426,12 +463,16 @@ def run_experiment_fact_selection(
     # A failed HTTP request can have reached the editing code. Check restoration
     # before allowing another fact or condition to run.
     try:
-        record["rollback_verified"] = run_probe(url, fact, model)["layer_signals"] == signals
+        record["rollback_verified"] = (
+            run_probe(url, fact, model)["layer_signals"] == signals
+        )
     except Exception as exc:
         record["error"] = f"Restoration probe failed: {exc}"
         raise ExperimentFailure(record["error"], record) from exc
     if not record["rollback_verified"]:
-        record["error"] = "Baseline probe changed after comparison; stopping the benchmark."
+        record["error"] = (
+            "Baseline probe changed after comparison; stopping the benchmark."
+        )
         raise ExperimentFailure(record["error"], record)
     if compare_error is not None:
         record["error"] = str(compare_error)
@@ -439,21 +480,33 @@ def run_experiment_fact_selection(
 
     matched = match_scheme_records(
         compare_data["schemes"],
-        {"static": static_layers, "telemetry": telemetry_layers, "random": random_layers},
+        {
+            "static": static_layers,
+            "telemetry": telemetry_layers,
+            "random": random_layers,
+        },
     )
 
-    for label, layers in (("static", static_layers), ("telemetry", telemetry_layers),
-                          ("random", random_layers)):
+    for label, layers in (
+        ("static", static_layers),
+        ("telemetry", telemetry_layers),
+        ("random", random_layers),
+    ):
         record[label] = extract_scheme_record(
-            {**matched[label], "optimization_config": compare_data.get("optimization_config")},
-            layers, label)
+            {
+                **matched[label],
+                "optimization_config": compare_data.get("optimization_config"),
+            },
+            layers,
+            label,
+        )
     record["status"] = "complete"
     return record
 
 
 def run_experiment_fact_optimization(
-    fact: Dict[str, Any], url: str, model: str = "gpt2-xl"
-) -> Dict[str, Any]:
+    fact: dict[str, Any], url: str, model: str = "gpt2-xl"
+) -> dict[str, Any]:
     """Runs Experiment 2 on a single fact across the 4 optimization profiles."""
     case_id = fact["case_id"]
     fixed_layers = get_static_preset(model, "memit")  # [13, 14, 15, 16, 17]
@@ -464,10 +517,17 @@ def run_experiment_fact_optimization(
 
     profiles = OPTIMIZATION_PROFILES
     profile_results = {}
-    record = {"case_id": case_id, "subject": fact["subject"],
-              "target_new": fact["target_new"], "target_true": fact["target_true"],
-              "layers": fixed_layers, "rollback_verified": True, "status": "failed",
-              "restoration_check": "baseline_probe_equality", "profiles": profile_results}
+    record = {
+        "case_id": case_id,
+        "subject": fact["subject"],
+        "target_new": fact["target_new"],
+        "target_true": fact["target_true"],
+        "layers": fixed_layers,
+        "rollback_verified": True,
+        "status": "failed",
+        "restoration_check": "baseline_probe_equality",
+        "profiles": profile_results,
+    }
 
     for prof in profiles:
         edit_body = {
@@ -499,28 +559,41 @@ def run_experiment_fact_optimization(
             raise ExperimentFailure(record["error"], record) from exc
         if not restored:
             record["rollback_verified"] = False
-            record["error"] = f"Baseline probe changed after {prof}; stopping the benchmark."
+            record["error"] = (
+                f"Baseline probe changed after {prof}; stopping the benchmark."
+            )
             raise ExperimentFailure(record["error"], record)
         if edit_error is not None:
-            profile_results[prof] = {"label": prof, "status": "failed",
-                                     "seconds": duration, "error": str(edit_error)}
+            profile_results[prof] = {
+                "label": prof,
+                "status": "failed",
+                "seconds": duration,
+                "error": str(edit_error),
+            }
             record["error"] = str(edit_error)
             raise ExperimentFailure(record["error"], record) from edit_error
         post = edit_data.get("post_edit", {})
         gen_text = post["generations"][0] if post.get("generations") else None
 
         profile_results[prof] = extract_scheme_record(
-            {"metrics": post.get("metrics"), "weight_drift": edit_data.get("weight_drift"),
-             "damage": edit_data.get("damage"), "generation": gen_text,
-             "optimization_config": edit_data.get("optimization_config")},
+            {
+                "metrics": post.get("metrics"),
+                "weight_drift": edit_data.get("weight_drift"),
+                "damage": edit_data.get("damage"),
+                "generation": gen_text,
+                "optimization_config": edit_data.get("optimization_config"),
+            },
             fixed_layers,
             label=prof,
             optimization=prof,
             seconds=round(duration, 2),
         )
         rec = profile_results[prof]
-        print(f"      [{prof}] Done ({duration:.1f}s). PS={rec['PS']}, S={rec['S']}, "
-              f"Rel-Frob={fmt_value(rec['frob_rel'])}", flush=True)
+        print(
+            f"      [{prof}] Done ({duration:.1f}s). PS={rec['PS']}, S={rec['S']}, "
+            f"Rel-Frob={fmt_value(rec['frob_rel'])}",
+            flush=True,
+        )
 
     record["status"] = "complete"
     return record
@@ -536,37 +609,57 @@ def aggregate_condition(facts, condition, metrics, optimization=False):
     records = [condition_record(fact, condition, optimization) for fact in facts]
     output = {}
     for metric in metrics:
-        values = [record.get(metric) for record in records if record.get(metric) is not None]
-        if any(isinstance(value, bool) or not isinstance(value, (int, float))
-               or not math.isfinite(value) for value in values):
-            raise ValueError(f"Invalid {condition}/{metric} observation in raw results.")
+        values = [
+            record.get(metric) for record in records if record.get(metric) is not None
+        ]
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            for value in values
+        ):
+            raise ValueError(
+                f"Invalid {condition}/{metric} observation in raw results."
+            )
         output[metric] = {
             "mean": round(float(np.mean(values)), 12) if values else None,
-            "std": round(float(np.std(values, ddof=1)), 12) if len(values) > 1 else None,
-            "n_measured": len(values), "n_missing": len(facts) - len(values),
+            "std": round(float(np.std(values, ddof=1)), 12)
+            if len(values) > 1
+            else None,
+            "n_measured": len(values),
+            "n_missing": len(facts) - len(values),
         }
-    repetition = [record["has_repetition"] for record in records
-                  if isinstance(record.get("has_repetition"), bool)]
-    output["repetition_rate"] = (round(sum(repetition) / len(repetition), 4)
-                                 if repetition else None)
+    repetition = [
+        record["has_repetition"]
+        for record in records
+        if isinstance(record.get("has_repetition"), bool)
+    ]
+    output["repetition_rate"] = (
+        round(sum(repetition) / len(repetition), 4) if repetition else None
+    )
     output["n_repetition_measured"] = len(repetition)
-    output["n_failed"] = sum(record.get("status") in ("failed", "invalid_baseline")
-                             for record in records)
+    output["n_failed"] = sum(
+        record.get("status") in ("failed", "invalid_baseline") for record in records
+    )
     output["n_unavailable"] = sum(not record for record in records)
     return output
 
 
-def analyze_results(raw: Dict[str, Any]) -> Dict[str, Any]:
+def analyze_results(raw: dict[str, Any]) -> dict[str, Any]:
     """Computes comprehensive statistical analyses, paired comparisons, and verdicts."""
     exp1_facts = raw.get("experiment_1_selection", [])
     exp2_facts = raw.get("experiment_2_optimization", [])
-    for name, facts in (("experiment_1_selection", exp1_facts),
-                        ("experiment_2_optimization", exp2_facts)):
+    for name, facts in (
+        ("experiment_1_selection", exp1_facts),
+        ("experiment_2_optimization", exp2_facts),
+    ):
         case_ids = [fact["case_id"] for fact in facts]
         if len(set(case_ids)) != len(case_ids):
-            raise ValueError(f"Duplicate case_id in {name}; facts are not independent pairs.")
+            raise ValueError(
+                f"Duplicate case_id in {name}; facts are not independent pairs."
+            )
 
-    summary: Dict[str, Any] = {
+    summary: dict[str, Any] = {
         "experiment_1_selection": {},
         "experiment_2_optimization": {},
         # Record the software that produced the statistics: the p-values are only
@@ -586,27 +679,60 @@ def analyze_results(raw: Dict[str, Any]) -> Dict[str, Any]:
         n1 = len(exp1_facts)
         conditions = ["static", "telemetry", "random"]
         metrics = [
-            "ES", "PS", "NS", "S",
-            "ES_greedy", "PS_greedy", "NS_greedy", "S_greedy",
-            "frob_abs", "frob_rel", "kl_divergence"
+            "ES",
+            "PS",
+            "NS",
+            "S",
+            "ES_greedy",
+            "PS_greedy",
+            "NS_greedy",
+            "S_greedy",
+            "frob_abs",
+            "frob_rel",
+            "kl_divergence",
         ]
 
-        cond_stats = {c: aggregate_condition(exp1_facts, c, metrics) for c in conditions}
+        cond_stats = {
+            c: aggregate_condition(exp1_facts, c, metrics) for c in conditions
+        }
 
         # Paired differences: Telemetry vs Static, Random vs Static, Telemetry vs Random
         paired_diffs = {}
-        for metric in ["ES", "PS", "NS", "S", "ES_greedy", "PS_greedy", "frob_abs", "frob_rel", "kl_divergence"]:
-            tel_vals = [condition_record(f, "telemetry").get(metric) for f in exp1_facts]
+        for metric in [
+            "ES",
+            "PS",
+            "NS",
+            "S",
+            "ES_greedy",
+            "PS_greedy",
+            "frob_abs",
+            "frob_rel",
+            "kl_divergence",
+        ]:
+            tel_vals = [
+                condition_record(f, "telemetry").get(metric) for f in exp1_facts
+            ]
             stat_vals = [condition_record(f, "static").get(metric) for f in exp1_facts]
             rand_vals = [condition_record(f, "random").get(metric) for f in exp1_facts]
 
-            paired_diffs[f"telemetry_vs_static_{metric}"] = paired_comparison(tel_vals, stat_vals)
-            paired_diffs[f"random_vs_static_{metric}"] = paired_comparison(rand_vals, stat_vals)
-            paired_diffs[f"telemetry_vs_random_{metric}"] = paired_comparison(tel_vals, rand_vals)
+            paired_diffs[f"telemetry_vs_static_{metric}"] = paired_comparison(
+                tel_vals, stat_vals
+            )
+            paired_diffs[f"random_vs_static_{metric}"] = paired_comparison(
+                rand_vals, stat_vals
+            )
+            paired_diffs[f"telemetry_vs_random_{metric}"] = paired_comparison(
+                tel_vals, rand_vals
+            )
 
         # Layer scheme agreement
-        layer_pairs = [(set(condition_record(f, "telemetry").get("layers", [])),
-                        set(condition_record(f, "static").get("layers", []))) for f in exp1_facts]
+        layer_pairs = [
+            (
+                set(condition_record(f, "telemetry").get("layers", [])),
+                set(condition_record(f, "static").get("layers", [])),
+            )
+            for f in exp1_facts
+        ]
         layer_pairs = [(a, b) for a, b in layer_pairs if a and b]
         same_as_static = sum(a == b for a, b in layer_pairs)
         overlap_with_static = [len(a & b) / len(a | b) for a, b in layer_pairs]
@@ -619,14 +745,28 @@ def analyze_results(raw: Dict[str, Any]) -> Dict[str, Any]:
             "paired_differences": paired_diffs,
             "policy_overlap": {
                 "n_measured": len(layer_pairs),
-                "exact_match_rate": round(same_as_static / len(layer_pairs), 4) if layer_pairs else None,
-                "mean_layer_jaccard_overlap": round(float(np.mean(overlap_with_static)), 4) if layer_pairs else None,
+                "exact_match_rate": round(same_as_static / len(layer_pairs), 4)
+                if layer_pairs
+                else None,
+                "mean_layer_jaccard_overlap": round(
+                    float(np.mean(overlap_with_static)), 4
+                )
+                if layer_pairs
+                else None,
             },
             "findings": {
-                "telemetry_beats_static_ES": finding_is_positive(paired_diffs["telemetry_vs_static_ES"]),
-                "telemetry_beats_static_S": finding_is_positive(paired_diffs["telemetry_vs_static_S"]),
-                "telemetry_beats_static_significant": finding_is_significant_improvement(paired_diffs["telemetry_vs_static_S"]),
-                "random_beats_static_significant": finding_is_significant_improvement(paired_diffs["random_vs_static_S"]),
+                "telemetry_beats_static_ES": finding_is_positive(
+                    paired_diffs["telemetry_vs_static_ES"]
+                ),
+                "telemetry_beats_static_S": finding_is_positive(
+                    paired_diffs["telemetry_vs_static_S"]
+                ),
+                "telemetry_beats_static_significant": finding_is_significant_improvement(
+                    paired_diffs["telemetry_vs_static_S"]
+                ),
+                "random_beats_static_significant": finding_is_significant_improvement(
+                    paired_diffs["random_vs_static_S"]
+                ),
             },
         }
 
@@ -635,12 +775,24 @@ def analyze_results(raw: Dict[str, Any]) -> Dict[str, Any]:
         n2 = len(exp2_facts)
         profs = ["standard", "standard_budget", "context_no_consistency", "context"]
         metrics = [
-            "ES", "PS", "NS", "S",
-            "ES_greedy", "PS_greedy", "NS_greedy", "S_greedy",
-            "frob_abs", "frob_rel", "kl_divergence", "seconds"
+            "ES",
+            "PS",
+            "NS",
+            "S",
+            "ES_greedy",
+            "PS_greedy",
+            "NS_greedy",
+            "S_greedy",
+            "frob_abs",
+            "frob_rel",
+            "kl_divergence",
+            "seconds",
         ]
 
-        prof_stats = {p: aggregate_condition(exp2_facts, p, metrics, optimization=True) for p in profs}
+        prof_stats = {
+            p: aggregate_condition(exp2_facts, p, metrics, optimization=True)
+            for p in profs
+        }
 
         paired_ablations = {}
         # 1. Total gain: context vs standard
@@ -649,16 +801,44 @@ def analyze_results(raw: Dict[str, Any]) -> Dict[str, Any]:
         # 4. Consistency penalty effect: context vs context_no_consistency
         comparisons = [
             ("total_gain_context_vs_standard", "context", "standard"),
-            ("budget_effect_standard_budget_vs_standard", "standard_budget", "standard"),
-            ("context_fitting_effect_no_cons_vs_budget", "context_no_consistency", "standard_budget"),
-            ("consistency_penalty_effect_context_vs_no_cons", "context", "context_no_consistency"),
+            (
+                "budget_effect_standard_budget_vs_standard",
+                "standard_budget",
+                "standard",
+            ),
+            (
+                "context_fitting_effect_no_cons_vs_budget",
+                "context_no_consistency",
+                "standard_budget",
+            ),
+            (
+                "consistency_penalty_effect_context_vs_no_cons",
+                "context",
+                "context_no_consistency",
+            ),
         ]
 
         for label, cond_a, cond_b in comparisons:
-            for metric in ["ES", "PS", "NS", "S", "ES_greedy", "PS_greedy", "frob_abs", "frob_rel", "kl_divergence"]:
-                a_vals = [condition_record(f, cond_a, True).get(metric) for f in exp2_facts]
-                b_vals = [condition_record(f, cond_b, True).get(metric) for f in exp2_facts]
-                paired_ablations[f"{label}_{metric}"] = paired_comparison(a_vals, b_vals)
+            for metric in [
+                "ES",
+                "PS",
+                "NS",
+                "S",
+                "ES_greedy",
+                "PS_greedy",
+                "frob_abs",
+                "frob_rel",
+                "kl_divergence",
+            ]:
+                a_vals = [
+                    condition_record(f, cond_a, True).get(metric) for f in exp2_facts
+                ]
+                b_vals = [
+                    condition_record(f, cond_b, True).get(metric) for f in exp2_facts
+                ]
+                paired_ablations[f"{label}_{metric}"] = paired_comparison(
+                    a_vals, b_vals
+                )
 
         summary["experiment_2_optimization"] = {
             "num_facts": n2,
@@ -667,12 +847,24 @@ def analyze_results(raw: Dict[str, Any]) -> Dict[str, Any]:
             "profile_aggregates": prof_stats,
             "paired_ablations": paired_ablations,
             "findings": {
-                "context_beats_standard_PS": finding_is_positive(paired_ablations["total_gain_context_vs_standard_PS"]),
-                "context_beats_standard_PS_significant": finding_is_significant_improvement(paired_ablations["total_gain_context_vs_standard_PS"]),
-                "budget_effect_PS": paired_ablations["budget_effect_standard_budget_vs_standard_PS"]["mean_diff"],
-                "context_fitting_effect_PS": paired_ablations["context_fitting_effect_no_cons_vs_budget_PS"]["mean_diff"],
-                "consistency_penalty_effect_PS": paired_ablations["consistency_penalty_effect_context_vs_no_cons_PS"]["mean_diff"],
-                "weight_drift_increase": paired_ablations["total_gain_context_vs_standard_frob_rel"]["mean_diff"],
+                "context_beats_standard_PS": finding_is_positive(
+                    paired_ablations["total_gain_context_vs_standard_PS"]
+                ),
+                "context_beats_standard_PS_significant": finding_is_significant_improvement(
+                    paired_ablations["total_gain_context_vs_standard_PS"]
+                ),
+                "budget_effect_PS": paired_ablations[
+                    "budget_effect_standard_budget_vs_standard_PS"
+                ]["mean_diff"],
+                "context_fitting_effect_PS": paired_ablations[
+                    "context_fitting_effect_no_cons_vs_budget_PS"
+                ]["mean_diff"],
+                "consistency_penalty_effect_PS": paired_ablations[
+                    "consistency_penalty_effect_context_vs_no_cons_PS"
+                ]["mean_diff"],
+                "weight_drift_increase": paired_ablations[
+                    "total_gain_context_vs_standard_frob_rel"
+                ]["mean_diff"],
             },
         }
 
@@ -680,14 +872,17 @@ def analyze_results(raw: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def select_benchmark_facts(manifest, mode, num_facts=None):
-    if num_facts is not None and (isinstance(num_facts, bool) or not isinstance(num_facts, int)
-                                  or num_facts <= 0):
+    if num_facts is not None and (
+        isinstance(num_facts, bool) or not isinstance(num_facts, int) or num_facts <= 0
+    ):
         raise ValueError("num_facts must be a positive integer.")
     split = "dev_facts" if mode == "smoke" else "eval_facts"
     facts = manifest[split]
     if num_facts is not None:
         if num_facts > len(facts):
-            raise ValueError(f"Requested {num_facts} facts, but {split} only contains {len(facts)}.")
+            raise ValueError(
+                f"Requested {num_facts} facts, but {split} only contains {len(facts)}."
+            )
         facts = facts[:num_facts]
     return facts
 
@@ -699,41 +894,66 @@ def experiment_identity(model, url, mode, manifest, facts, health):
     hashes = health.get("backend_source_sha256", {})
     for filename in ("modal_app.py", "editing_optimizations.py"):
         digest = hashes.get(filename)
-        if (not isinstance(digest, str) or len(digest) != 64
-                or any(c not in "0123456789abcdef" for c in digest)):
-            raise ValueError(f"Backend must report its actual deployed {filename} SHA-256.")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)
+        ):
+            raise ValueError(
+                f"Backend must report its actual deployed {filename} SHA-256."
+            )
     n_layers = health.get("n_layers")
     expected_layers = 48 if model == "gpt2-xl" else 28
     if n_layers != expected_layers:
-        raise ValueError("Backend layer count does not match the requested architecture.")
+        raise ValueError(
+            "Backend layer count does not match the requested architecture."
+        )
     if not health.get("editing_commit"):
         raise ValueError("Backend editing revision is missing.")
     if not set(OPTIMIZATION_PROFILES).issubset(health.get("memit_optimizations", [])):
         raise ValueError("Backend does not support the planned optimization profiles.")
-    sources = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-               for name in ("run_experiments.py", "layer_selection.py", "prepare_benchmark.py")}
-    return {"schema_version": EXPERIMENT_SCHEMA, "model": model, "url": url.rstrip("/"),
-            "mode": mode, "manifest_sha256": validate_manifest(manifest),
-            "case_ids": [fact["case_id"] for fact in facts],
-            "backend_source_sha256": hashes, "editing_commit": health["editing_commit"],
-            "model_revision": health.get("model_revision"), "driver_source_sha256": sources,
-            "selection_seed": 42, "n_layers": n_layers,
-            "optimization_profiles": list(OPTIMIZATION_PROFILES),
-            "scipy_version": scipy.__version__, "numpy_version": np.__version__,
-            "wilcoxon_method": WILCOXON_METHOD}
+    sources = {
+        name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+        for name in ("run_experiments.py", "layer_selection.py", "prepare_benchmark.py")
+    }
+    return {
+        "schema_version": EXPERIMENT_SCHEMA,
+        "model": model,
+        "url": url.rstrip("/"),
+        "mode": mode,
+        "manifest_sha256": validate_manifest(manifest),
+        "case_ids": [fact["case_id"] for fact in facts],
+        "backend_source_sha256": hashes,
+        "editing_commit": health["editing_commit"],
+        "model_revision": health.get("model_revision"),
+        "driver_source_sha256": sources,
+        "selection_seed": 42,
+        "n_layers": n_layers,
+        "optimization_profiles": list(OPTIMIZATION_PROFILES),
+        "scipy_version": scipy.__version__,
+        "numpy_version": np.__version__,
+        "wilcoxon_method": WILCOXON_METHOD,
+    }
 
 
 def validate_checkpoint(previous, identity):
     if previous.get("metadata", {}).get("run_identity") != identity:
-        raise ValueError("Checkpoint belongs to a different or unrecorded run identity. Use a new output directory.")
+        raise ValueError(
+            "Checkpoint belongs to a different or unrecorded run identity. Use a new output directory."
+        )
     planned = set(identity["case_ids"])
     for key in ("experiment_1_selection", "experiment_2_optimization"):
         facts = previous.get(key, [])
         ids = [fact["case_id"] for fact in facts]
         if len(set(ids)) != len(ids) or not set(ids).issubset(planned):
             raise ValueError(f"Checkpoint {key} has duplicate or unplanned case IDs.")
-        if any(fact.get("status") == "failed" or fact.get("rollback_verified") is False for fact in facts):
-            raise ValueError("Checkpoint contains failed or contaminated observations. Review it and use a new output directory.")
+        if any(
+            fact.get("status") == "failed" or fact.get("rollback_verified") is False
+            for fact in facts
+        ):
+            raise ValueError(
+                "Checkpoint contains failed or contaminated observations. Review it and use a new output directory."
+            )
 
 
 def save_json(path, payload):
@@ -751,9 +971,17 @@ def execute_fact(runner, fact, raw, key, path, url, model):
     try:
         record = runner(fact, url, model)
     except Exception as exc:
-        record = (exc.record if isinstance(exc, ExperimentFailure) else {
-            "case_id": fact["case_id"], "subject": fact["subject"],
-            "status": "failed", "rollback_verified": None, "error": str(exc)})
+        record = (
+            exc.record
+            if isinstance(exc, ExperimentFailure)
+            else {
+                "case_id": fact["case_id"],
+                "subject": fact["subject"],
+                "status": "failed",
+                "rollback_verified": None,
+                "error": str(exc),
+            }
+        )
         raw[key].append(record)
         save_json(path, raw)
         raise
@@ -763,16 +991,34 @@ def execute_fact(runner, fact, raw, key, path, url, model):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run benchmark experiments for KEditVis evaluation.")
+    parser = argparse.ArgumentParser(
+        description="Run benchmark experiments for KEditVis evaluation."
+    )
     parser.add_argument("--url", default=DEFAULT_URL, help="Modal web app URL")
-    parser.add_argument("--model", default="gpt2-xl", choices=["gpt2-xl", "EleutherAI/gpt-j-6B"])
-    parser.add_argument("--mode", default="smoke", choices=["smoke", "full", "selection", "optimization", "analyze-only"])
-    parser.add_argument("--num-facts", type=int, default=None, help="Max number of facts to evaluate")
-    parser.add_argument("--manifest", default=str(MANIFEST_PATH), help="Path to benchmark manifest JSON")
-    parser.add_argument("--output-dir", default=str(Path(__file__).parent / "audit" / "run"),
-                        help="Output directory; defaults to regenerated audit/run artifacts")
-    parser.add_argument("--raw-results", type=Path,
-                        help="Read this raw result file in analyze-only mode, preserving its directory")
+    parser.add_argument(
+        "--model", default="gpt2-xl", choices=["gpt2-xl", "EleutherAI/gpt-j-6B"]
+    )
+    parser.add_argument(
+        "--mode",
+        default="smoke",
+        choices=["smoke", "full", "selection", "optimization", "analyze-only"],
+    )
+    parser.add_argument(
+        "--num-facts", type=int, default=None, help="Max number of facts to evaluate"
+    )
+    parser.add_argument(
+        "--manifest", default=str(MANIFEST_PATH), help="Path to benchmark manifest JSON"
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=str(Path(__file__).parent / "audit" / "run"),
+        help="Output directory; defaults to regenerated audit/run artifacts",
+    )
+    parser.add_argument(
+        "--raw-results",
+        type=Path,
+        help="Read this raw result file in analyze-only mode, preserving its directory",
+    )
     args = parser.parse_args()
 
     out_dir = Path(args.output_dir)
@@ -785,11 +1031,15 @@ def main():
         if not input_path.exists():
             raise FileNotFoundError(f"{input_path} does not exist.")
         if summary_path.resolve() == input_path.with_name("summary.json").resolve():
-            raise ValueError("Analyze-only must write to a separate output directory to preserve recorded evidence.")
+            raise ValueError(
+                "Analyze-only must write to a separate output directory to preserve recorded evidence."
+            )
         with open(input_path, "r", encoding="utf-8") as f:
             raw = json.load(f)
         summary = analyze_results(raw)
-        summary["metadata"]["analysis_input_sha256"] = hashlib.sha256(input_path.read_bytes()).hexdigest()
+        summary["metadata"]["analysis_input_sha256"] = hashlib.sha256(
+            input_path.read_bytes()
+        ).hexdigest()
         save_json(summary_path, summary)
         print(f"Analysis saved to {summary_path}")
         return
@@ -803,17 +1053,25 @@ def main():
         with raw_path.open(encoding="utf-8") as checkpoint:
             previous = json.load(checkpoint)
         if "run_identity" not in previous.get("metadata", {}):
-            raise ValueError("Historical checkpoint has no producing-build identity. Use a new output directory.")
+            raise ValueError(
+                "Historical checkpoint has no producing-build identity. Use a new output directory."
+            )
 
     # Check health and backend connectivity
     print(f"Connecting to {args.url} ...")
     health = check_health(args.url, args.model)
-    print(f"Backend healthy. Model: {health['model']}, Layers: {health['n_layers']}, Profiles: {health['memit_optimizations']}")
+    print(
+        f"Backend healthy. Model: {health['model']}, Layers: {health['n_layers']}, Profiles: {health['memit_optimizations']}"
+    )
 
-    identity = experiment_identity(args.model, args.url, args.mode, manifest, facts, health)
-    print(f"Running mode '{args.mode}' on {len(facts)} {'development' if args.mode == 'smoke' else 'evaluation'} facts...")
+    identity = experiment_identity(
+        args.model, args.url, args.mode, manifest, facts, health
+    )
+    print(
+        f"Running mode '{args.mode}' on {len(facts)} {'development' if args.mode == 'smoke' else 'evaluation'} facts..."
+    )
 
-    raw_results: Dict[str, Any] = {
+    raw_results: dict[str, Any] = {
         "metadata": {
             "model": args.model,
             "manifest_sha256": manifest["metadata"]["sha256"],
@@ -825,8 +1083,11 @@ def main():
             "wilcoxon_method": WILCOXON_METHOD,
             "run_identity": identity,
             "dataset_source_sha256": manifest["metadata"].get("source_sha256"),
-            "dataset_provenance_scope": ("complete_source_pin" if manifest["metadata"].get("source_sha256")
-                                         else "legacy_subset_digest_only; full source revision unavailable"),
+            "dataset_provenance_scope": (
+                "complete_source_pin"
+                if manifest["metadata"].get("source_sha256")
+                else "legacy_subset_digest_only; full source revision unavailable"
+            ),
         },
         "experiment_1_selection": [],
         "experiment_2_optimization": [],
@@ -835,7 +1096,9 @@ def main():
     if previous is not None:
         validate_checkpoint(previous, identity)
         raw_results = previous
-        print(f"Loaded matching progress: {len(raw_results['experiment_1_selection'])} selection, {len(raw_results['experiment_2_optimization'])} optimization facts.")
+        print(
+            f"Loaded matching progress: {len(raw_results['experiment_1_selection'])} selection, {len(raw_results['experiment_2_optimization'])} optimization facts."
+        )
     save_json(raw_path, raw_results)
 
     do_selection = args.mode in ["smoke", "full", "selection"]
@@ -848,43 +1111,82 @@ def main():
         for idx, fact in enumerate(facts, 1):
             cid = fact["case_id"]
             if cid in existing_cases:
-                print(f"[{idx}/{len(facts)}] Case {cid} ({fact['subject']}) already evaluated for Exp 1. Skipping.")
+                print(
+                    f"[{idx}/{len(facts)}] Case {cid} ({fact['subject']}) already evaluated for Exp 1. Skipping."
+                )
                 continue
-            print(f"[{idx}/{len(facts)}] Evaluating Case {cid}: '{fact['subject']}' -> '{fact['target_new']}'...")
+            print(
+                f"[{idx}/{len(facts)}] Evaluating Case {cid}: '{fact['subject']}' -> '{fact['target_new']}'..."
+            )
             t0 = time.monotonic()
-            rec = execute_fact(run_experiment_fact_selection, fact, raw_results,
-                               "experiment_1_selection", raw_path, args.url, args.model)
+            rec = execute_fact(
+                run_experiment_fact_selection,
+                fact,
+                raw_results,
+                "experiment_1_selection",
+                raw_path,
+                args.url,
+                args.model,
+            )
             dt = time.monotonic() - t0
             print(f"   Done ({dt:.1f}s). Rollback verified: {rec['rollback_verified']}")
-            print(f"   Static {rec['static']['layers']}: ES={rec['static']['ES']}, PS={rec['static']['PS']}, S={rec['static']['S']}, Rel-Frob={fmt_value(rec['static']['frob_rel'])}")
-            print(f"   Telemetry {rec['telemetry']['layers']}: ES={rec['telemetry']['ES']}, PS={rec['telemetry']['PS']}, S={rec['telemetry']['S']}, Rel-Frob={fmt_value(rec['telemetry']['frob_rel'])}")
-            print(f"   Random {rec['random']['layers']}: ES={rec['random']['ES']}, PS={rec['random']['PS']}, S={rec['random']['S']}, Rel-Frob={fmt_value(rec['random']['frob_rel'])}")
-
+            print(
+                f"   Static {rec['static']['layers']}: ES={rec['static']['ES']}, PS={rec['static']['PS']}, S={rec['static']['S']}, Rel-Frob={fmt_value(rec['static']['frob_rel'])}"
+            )
+            print(
+                f"   Telemetry {rec['telemetry']['layers']}: ES={rec['telemetry']['ES']}, PS={rec['telemetry']['PS']}, S={rec['telemetry']['S']}, Rel-Frob={fmt_value(rec['telemetry']['frob_rel'])}"
+            )
+            print(
+                f"   Random {rec['random']['layers']}: ES={rec['random']['ES']}, PS={rec['random']['PS']}, S={rec['random']['S']}, Rel-Frob={fmt_value(rec['random']['frob_rel'])}"
+            )
 
     # Execute Experiment 2
     if do_optimization:
         print("\n=== STARTING EXPERIMENT 2: ALGORITHM ABLATION ===")
-        existing_cases = {f["case_id"] for f in raw_results["experiment_2_optimization"]}
+        existing_cases = {
+            f["case_id"] for f in raw_results["experiment_2_optimization"]
+        }
         for idx, fact in enumerate(facts, 1):
             cid = fact["case_id"]
             if cid in existing_cases:
-                print(f"[{idx}/{len(facts)}] Case {cid} ({fact['subject']}) already evaluated for Exp 2. Skipping.")
+                print(
+                    f"[{idx}/{len(facts)}] Case {cid} ({fact['subject']}) already evaluated for Exp 2. Skipping."
+                )
                 continue
-            print(f"[{idx}/{len(facts)}] Evaluating Case {cid}: '{fact['subject']}' -> '{fact['target_new']}'...")
+            print(
+                f"[{idx}/{len(facts)}] Evaluating Case {cid}: '{fact['subject']}' -> '{fact['target_new']}'..."
+            )
             t0 = time.monotonic()
-            rec = execute_fact(run_experiment_fact_optimization, fact, raw_results,
-                               "experiment_2_optimization", raw_path, args.url, args.model)
+            rec = execute_fact(
+                run_experiment_fact_optimization,
+                fact,
+                raw_results,
+                "experiment_2_optimization",
+                raw_path,
+                args.url,
+                args.model,
+            )
             dt = time.monotonic() - t0
             p = rec["profiles"]
             print(f"   Done ({dt:.1f}s). Rollback verified: {rec['rollback_verified']}")
-            print(f"   Standard:        PS={p['standard']['PS']}, S={p['standard']['S']}, Rel-Frob={fmt_value(p['standard']['frob_rel'])}, KL={fmt_value(p['standard']['kl_divergence'])}")
-            print(f"   Standard Budget: PS={p['standard_budget']['PS']}, S={p['standard_budget']['S']}, Rel-Frob={fmt_value(p['standard_budget']['frob_rel'])}, KL={fmt_value(p['standard_budget']['kl_divergence'])}")
-            print(f"   Context No-Cons: PS={p['context_no_consistency']['PS']}, S={p['context_no_consistency']['S']}, Rel-Frob={fmt_value(p['context_no_consistency']['frob_rel'])}, KL={fmt_value(p['context_no_consistency']['kl_divergence'])}")
-            print(f"   Context Full v3: PS={p['context']['PS']}, S={p['context']['S']}, Rel-Frob={fmt_value(p['context']['frob_rel'])}, KL={fmt_value(p['context']['kl_divergence'])}")
-
+            print(
+                f"   Standard:        PS={p['standard']['PS']}, S={p['standard']['S']}, Rel-Frob={fmt_value(p['standard']['frob_rel'])}, KL={fmt_value(p['standard']['kl_divergence'])}"
+            )
+            print(
+                f"   Standard Budget: PS={p['standard_budget']['PS']}, S={p['standard_budget']['S']}, Rel-Frob={fmt_value(p['standard_budget']['frob_rel'])}, KL={fmt_value(p['standard_budget']['kl_divergence'])}"
+            )
+            print(
+                f"   Context No-Cons: PS={p['context_no_consistency']['PS']}, S={p['context_no_consistency']['S']}, Rel-Frob={fmt_value(p['context_no_consistency']['frob_rel'])}, KL={fmt_value(p['context_no_consistency']['kl_divergence'])}"
+            )
+            print(
+                f"   Context Full v3: PS={p['context']['PS']}, S={p['context']['S']}, Rel-Frob={fmt_value(p['context']['frob_rel'])}, KL={fmt_value(p['context']['kl_divergence'])}"
+            )
 
     # Analyze and generate statistical summary
-    print("\nComputing statistical analysis and bootstrap confidence intervals...", flush=True)
+    print(
+        "\nComputing statistical analysis and bootstrap confidence intervals...",
+        flush=True,
+    )
     summary = analyze_results(raw_results)
     save_json(summary_path, summary)
     print(f"Saved statistical summary to {summary_path}", flush=True)

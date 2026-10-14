@@ -52,8 +52,12 @@ def build_revised_document(source: Path, output: Path) -> Path:
             "The .docx sources are not tracked in this repository; pass --source "
             "pointing at the original file."
         )
-    if source.resolve() == output.resolve() or (output.exists() and source.samefile(output)):
-        raise ValueError("The output must be a separate file; the original document is preserved.")
+    if source.resolve() == output.resolve() or (
+        output.exists() and source.samefile(output)
+    ):
+        raise ValueError(
+            "The output must be a separate file; the original document is preserved."
+        )
 
     document = docx.Document(str(source))
     paragraph = next(
@@ -84,8 +88,12 @@ def build_revised_document(source: Path, output: Path) -> Path:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--source", required=True, type=Path, help="original .docx to read")
-    parser.add_argument("--output", required=True, type=Path, help="revised .docx to write")
+    parser.add_argument(
+        "--source", required=True, type=Path, help="original .docx to read"
+    )
+    parser.add_argument(
+        "--output", required=True, type=Path, help="revised .docx to write"
+    )
     args = parser.parse_args()
 
     written = build_revised_document(args.source, args.output)

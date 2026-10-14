@@ -13,9 +13,9 @@ measurements. Historical verification manifests are never overwritten.
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
 REPO_ROOT = BASE_DIR.parent
@@ -61,8 +61,11 @@ FILES_TO_HASH = [
     BASE_DIR / "frontend" / "complete_test_protocol.js",
     BASE_DIR / "frontend" / "capture_browser_screenshots.js",
 ]
-FILES_TO_HASH.extend(sorted(path for path in (BASE_DIR / "frontend" / "src").rglob("*")
-                            if path.is_file()))
+FILES_TO_HASH.extend(
+    sorted(
+        path for path in (BASE_DIR / "frontend" / "src").rglob("*") if path.is_file()
+    )
+)
 FILES_TO_HASH.extend(sorted((BASE_DIR / "frontend" / "tests").glob("*.mjs")))
 
 
@@ -135,10 +138,18 @@ def main():
         action="store_true",
         help="write a current hash-only snapshot, without claiming tests were run",
     )
-    parser.add_argument("--manifest", type=Path, default=MANIFEST_PATH,
-                        help="Stored hashes to compare against (historical manifest by default)")
-    parser.add_argument("--output", type=Path, default=BASE_DIR / "audit" / "run" / "hash_snapshot.json",
-                        help="New hash-only snapshot path used by --update")
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=MANIFEST_PATH,
+        help="Stored hashes to compare against (historical manifest by default)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=BASE_DIR / "audit" / "run" / "hash_snapshot.json",
+        help="New hash-only snapshot path used by --update",
+    )
     args = parser.parse_args()
 
     current, missing = current_hashes()
@@ -147,12 +158,16 @@ def main():
 
     width = max((len(row["file"]) for row in rows), default=0)
     for row in rows:
-        print(f"{row['status']:<11} {row['file']:<{width}}  {(row['actual_sha256'] or '-')[:12]}")
+        print(
+            f"{row['status']:<11} {row['file']:<{width}}  {(row['actual_sha256'] or '-')[:12]}"
+        )
     for key in missing:
         print(f"{'ABSENT':<11} {key}")
 
     if not mismatches and not missing and not args.update:
-        print(f"\nHASHES_MATCH: all {len(rows)} artifacts match the stored manifest; runtime tests were not evaluated.")
+        print(
+            f"\nHASHES_MATCH: all {len(rows)} artifacts match the stored manifest; runtime tests were not evaluated."
+        )
         return 0
 
     if mismatches or missing:
@@ -162,13 +177,17 @@ def main():
         )
 
     if not args.update:
-        print("--update writes a separate current hash snapshot; it does not rerun or validate historical experiments.")
+        print(
+            "--update writes a separate current hash snapshot; it does not rerun or validate historical experiments."
+        )
         return 1
     if missing:
         print("Snapshot refused: required artifacts are missing.")
         return 1
     if args.output.resolve() == MANIFEST_PATH.resolve():
-        print("Snapshot refused: the historical verification manifest must be preserved.")
+        print(
+            "Snapshot refused: the historical verification manifest must be preserved."
+        )
         return 1
     args.output.parent.mkdir(parents=True, exist_ok=True)
     manifest_key = "prototype/data/benchmark_manifest.json"
@@ -180,7 +199,9 @@ def main():
         "scope": "Current artifact hashes only. No runtime checks were performed by this script.",
         "historical_measurements": {
             "producing_build_provenance": "unknown unless recorded in each result's run_identity; never inferred from current hashes",
-            "raw_results_sha256": current.get("prototype/audit/evaluation/raw_results.json"),
+            "raw_results_sha256": current.get(
+                "prototype/audit/evaluation/raw_results.json"
+            ),
             "summary_sha256": current.get("prototype/audit/evaluation/summary.json"),
         },
         "benchmark_manifest_sha256": current.get(manifest_key),
@@ -190,8 +211,12 @@ def main():
     }
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(verification, f, indent=2)
-    print(f"\nCurrent hash-only snapshot written with {len(current)} hashes: {args.output}")
-    print(f"{len(mismatches)} superseded entries recorded under previous_manifest_differences.")
+    print(
+        f"\nCurrent hash-only snapshot written with {len(current)} hashes: {args.output}"
+    )
+    print(
+        f"{len(mismatches)} superseded entries recorded under previous_manifest_differences."
+    )
     return 0
 
 

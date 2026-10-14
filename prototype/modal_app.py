@@ -99,6 +99,7 @@ def _backend_source_sha256():
     """Identify source files mounted in the running worker, not the caller's checkout."""
     import hashlib
     from pathlib import Path
+
     import editing_optimizations
 
     sources = {
@@ -128,10 +129,9 @@ def _seed_memit_rng():
     # alone is not enough once the cache is populated, so also drop the cache
     # and let it rebuild from the fixed seed; every edit then sees the same
     # canonical templates as a fresh container.
-    import torch
-
     import memit.memit_main as _memit_main
     import rome.rome_main as _rome_main
+    import torch
 
     torch.manual_seed(0)
     torch.cuda.manual_seed_all(0)
@@ -139,10 +139,8 @@ def _seed_memit_rng():
     _rome_main.CONTEXT_TEMPLATES_CACHE = None
 
 
-
 def _restore_weights(model, orig_weights):
     import torch
-
     from util import nethook
 
     with torch.no_grad():
@@ -161,6 +159,7 @@ def _compute_weight_drift(model, orig_weights):
       Mean-Layer-Rel-Frob = (1 / |L|) * sum_l Rel-Frob_l
     """
     import math
+
     import torch
     from util import nethook
 
@@ -188,13 +187,15 @@ def _compute_weight_drift(model, orig_weights):
                 "relative_frobenius": rel_frob,
                 "orig_frobenius": orig_frob,
             }
-            sum_delta_sq += delta_frob ** 2
-            sum_orig_sq += orig_frob ** 2
+            sum_delta_sq += delta_frob**2
+            sum_orig_sq += orig_frob**2
 
     total_abs = math.sqrt(sum_delta_sq)
     total_orig = math.sqrt(sum_orig_sq)
     total_rel = total_abs / max(total_orig, 1e-12)
-    mean_rel = sum(v["relative_frobenius"] for v in per_layer.values()) / max(len(per_layer), 1)
+    mean_rel = sum(v["relative_frobenius"] for v in per_layer.values()) / max(
+        len(per_layer), 1
+    )
 
     return {
         "total_absolute_frobenius": total_abs,
@@ -220,18 +221,28 @@ def _apply_with_rollback(apply_fn, model, tok, requests, hparams):
         raise ValueError("Editing layer is outside the model.")
     hparams.layers = layers
     originals = {
-        f"{hparams.rewrite_module_tmp.format(layer)}.weight":
-        nethook.get_parameter(model, f"{hparams.rewrite_module_tmp.format(layer)}.weight").detach().cpu().clone()
+        f"{hparams.rewrite_module_tmp.format(layer)}.weight": nethook.get_parameter(
+            model, f"{hparams.rewrite_module_tmp.format(layer)}.weight"
+        )
+        .detach()
+        .cpu()
+        .clone()
         for layer in layers
     }
-    gradient_flags = [(parameter, parameter.requires_grad) for parameter in model.parameters()]
+    gradient_flags = [
+        (parameter, parameter.requires_grad) for parameter in model.parameters()
+    ]
     handles = []
     try:
         # Transformers GPT-J calls blocks with hidden_states=; upstream Trace
         # otherwise records an empty tuple and MEMIT cannot read block inputs.
         for name, module in model.named_modules():
             if name.startswith("transformer.h.") and name.count(".") == 2:
-                handles.append(module.register_forward_pre_hook(_positional_hidden_state, with_kwargs=True))
+                handles.append(
+                    module.register_forward_pre_hook(
+                        _positional_hidden_state, with_kwargs=True
+                    )
+                )
         edited, _ = apply_fn(model, tok, requests, hparams, return_orig_weights=False)
         return edited, originals
     except BaseException:
@@ -355,12 +366,14 @@ def _probe_layers(model, tok, prompt_filled, subject, top_k=5):
     def make_mlp_hook(name):
         def hook(module, inputs, output):
             captured[name] = {"input": inputs[0].detach(), "output": output.detach()}
+
         return hook
 
     def make_block_hook(name):
         def hook(module, inputs, output):
             hs = output[0] if isinstance(output, tuple) else output
             residuals[name] = hs.detach()
+
         return hook
 
     mods = dict(model.named_modules())
@@ -461,15 +474,15 @@ def _eval_prefix_targets(model, tok, prefixes, target_new, target_true):
         return []
     clean_prefixes = [prefix.rstrip() for prefix in prefixes]
     targets = [target_new.strip(), target_true.strip()]
-    if any(not prefix for prefix in clean_prefixes) or any(not target for target in targets):
+    if any(not prefix for prefix in clean_prefixes) or any(
+        not target for target in targets
+    ):
         raise ValueError("Scoring requires non-empty prefixes and targets.")
 
-    combined = [
-        f"{prefix} {suffix}"
-        for prefix in clean_prefixes
-        for suffix in targets
-    ]
-    batch = tok(combined, padding=True, return_offsets_mapping=True, return_tensors="pt").to(device)
+    combined = [f"{prefix} {suffix}" for prefix in clean_prefixes for suffix in targets]
+    batch = tok(
+        combined, padding=True, return_offsets_mapping=True, return_tensors="pt"
+    ).to(device)
     offsets = batch.pop("offset_mapping").cpu().tolist()
 
     with torch.no_grad():
@@ -479,7 +492,11 @@ def _eval_prefix_targets(model, tok, prefixes, target_new, target_true):
         nll = 0.0
         correct = True
         target_start = len(clean_prefixes[row // 2]) + 1
-        positions = [i for i, (_, end) in enumerate(offsets[row]) if end > target_start and batch["attention_mask"][row, i]]
+        positions = [
+            i
+            for i, (_, end) in enumerate(offsets[row])
+            if end > target_start and batch["attention_mask"][row, i]
+        ]
         if not positions or positions[0] == 0:
             raise ValueError("Could not align target tokens with a preceding prefix.")
         for position in positions:
@@ -552,14 +569,27 @@ def _evaluate_edit(
     """
     if neighborhood_targets is not None:
         if len(neighborhood_targets) != len(neighborhood_prompts):
-            raise ValueError("Neighborhood targets must align with neighborhood prompts.")
+            raise ValueError(
+                "Neighborhood targets must align with neighborhood prompts."
+            )
         if any(not target.strip() for target in neighborhood_targets):
             raise ValueError("Neighborhood targets must not be blank.")
 
     rewrite_prompt = prompt.format(subject)
-    es_results = _eval_prefix_targets(model, tok, [rewrite_prompt], target_new, target_true)
-    es_rate = sum(r["target_new_nll"] < r["target_true_nll"] for r in es_results) / len(es_results) if es_results else 0.0
-    es_greedy = sum(bool(r["target_new_correct"]) for r in es_results) / len(es_results) if es_results else 0.0
+    es_results = _eval_prefix_targets(
+        model, tok, [rewrite_prompt], target_new, target_true
+    )
+    es_rate = (
+        sum(r["target_new_nll"] < r["target_true_nll"] for r in es_results)
+        / len(es_results)
+        if es_results
+        else 0.0
+    )
+    es_greedy = (
+        sum(bool(r["target_new_correct"]) for r in es_results) / len(es_results)
+        if es_results
+        else 0.0
+    )
 
     ps_results = (
         _eval_prefix_targets(model, tok, paraphrase_prompts, target_new, target_true)
@@ -567,7 +597,8 @@ def _evaluate_edit(
         else []
     )
     ps_rate = (
-        sum(r["target_new_nll"] < r["target_true_nll"] for r in ps_results) / len(ps_results)
+        sum(r["target_new_nll"] < r["target_true_nll"] for r in ps_results)
+        / len(ps_results)
         if ps_results
         else None
     )
@@ -584,10 +615,13 @@ def _evaluate_edit(
                 res = _eval_prefix_targets(model, tok, [n_prompt], target_new, n_target)
                 ns_results.extend(res)
         else:
-            ns_results = _eval_prefix_targets(model, tok, neighborhood_prompts, target_new, target_true)
+            ns_results = _eval_prefix_targets(
+                model, tok, neighborhood_prompts, target_new, target_true
+            )
 
     ns_rate = (
-        sum(r["target_true_nll"] < r["target_new_nll"] for r in ns_results) / len(ns_results)
+        sum(r["target_true_nll"] < r["target_new_nll"] for r in ns_results)
+        / len(ns_results)
         if ns_results
         else None
     )
@@ -598,7 +632,11 @@ def _evaluate_edit(
     )
 
     s = _harmonic_mean([es_rate, ps_rate, ns_rate])
-    s_greedy = _harmonic_mean([es_greedy, ps_greedy, ns_greedy]) if all(x is not None for x in [es_greedy, ps_greedy, ns_greedy]) else None
+    s_greedy = (
+        _harmonic_mean([es_greedy, ps_greedy, ns_greedy])
+        if all(x is not None for x in [es_greedy, ps_greedy, ns_greedy])
+        else None
+    )
 
     return {
         "ES": es_rate,
@@ -653,17 +691,26 @@ def _hidden_states(model, tok, prompts, layers):
     captured = {layer: [] for layer in layers}
     modules = dict(model.named_modules())
     handles = []
+
     def hook(layer):
         def capture(module, inputs, output):
             hidden = output[0] if isinstance(output, tuple) else output
             captured[layer].append(hidden[0, -1].detach().float().cpu().clone())
+
         return capture
+
     try:
         for layer in layers:
-            handles.append(modules[f"transformer.h.{layer}"].register_forward_hook(hook(layer)))
+            handles.append(
+                modules[f"transformer.h.{layer}"].register_forward_hook(hook(layer))
+            )
         with torch.no_grad():
             for prompt in prompts:
-                model(**tok(prompt, return_tensors="pt").to(next(model.parameters()).device))
+                model(
+                    **tok(prompt, return_tensors="pt").to(
+                        next(model.parameters()).device
+                    )
+                )
     finally:
         for handle in handles:
             handle.remove()
@@ -684,7 +731,9 @@ def _project_drift(before, after):
     from sklearn.manifold import TSNE
 
     if before.shape != after.shape or before.ndim != 2:
-        raise ValueError("Drift embeddings must have matching [prompts, hidden] shapes.")
+        raise ValueError(
+            "Drift embeddings must have matching [prompts, hidden] shapes."
+        )
     values = torch.cat([before, after]).float().cpu().numpy()
     if not np.isfinite(values).all():
         raise ValueError("Drift embeddings contain non-finite values.")
@@ -696,13 +745,27 @@ def _project_drift(before, after):
         projected[:, :dims] = u[:, :dims] * singular[:dims]
         method = "pca-small-sample"
     else:
-        projected = TSNE(n_components=2, perplexity=min(30, max(1, (len(values) - 1) / 3)),
-                         init="pca", learning_rate="auto", random_state=0).fit_transform(values)
+        projected = TSNE(
+            n_components=2,
+            perplexity=min(30, max(1, (len(values) - 1) / 3)),
+            init="pca",
+            learning_rate="auto",
+            random_state=0,
+        ).fit_transform(values)
         method = "joint-tsne"
     distances = torch.linalg.vector_norm(after.float() - before.float(), dim=1).tolist()
     count = before.shape[0]
-    return [{"projection": {"pre": projected[i].tolist(), "post": projected[i + count].tolist()},
-             "hidden_state_drift": distances[i], "projection_method": method} for i in range(count)]
+    return [
+        {
+            "projection": {
+                "pre": projected[i].tolist(),
+                "post": projected[i + count].tolist(),
+            },
+            "hidden_state_drift": distances[i],
+            "projection_method": method,
+        }
+        for i in range(count)
+    ]
 
 
 def _generate_text(model, tok, prompts, max_out_len=80):
@@ -711,9 +774,15 @@ def _generate_text(model, tok, prompts, max_out_len=80):
     texts = []
     with torch.no_grad():
         for prompt in prompts:
-            encoded = tok(prompt, return_tensors="pt").to(next(model.parameters()).device)
-            output = model.generate(**encoded, do_sample=False, max_new_tokens=max_out_len,
-                                    pad_token_id=tok.eos_token_id)
+            encoded = tok(prompt, return_tensors="pt").to(
+                next(model.parameters()).device
+            )
+            output = model.generate(
+                **encoded,
+                do_sample=False,
+                max_new_tokens=max_out_len,
+                pad_token_id=tok.eos_token_id,
+            )
             texts.append(tok.decode(output[0], skip_special_tokens=True))
     return texts
 
@@ -728,23 +797,38 @@ def _neighborhood_snapshot(model, tok, prompts):
         for prompt in prompts:
             encoded = tok(prompt, return_tensors="pt").to(device)
             output = model.generate(
-                **encoded, do_sample=False, max_new_tokens=40,
+                **encoded,
+                do_sample=False,
+                max_new_tokens=40,
                 pad_token_id=tok.eos_token_id,
             )
             texts.append(tok.decode(output[0], skip_special_tokens=True))
     return texts, _damage_logprobs(model, tok, prompts)
 
 
-def _neighborhood_report(prompts, before, after, pre_hidden=None, post_hidden=None, layer=None):
+def _neighborhood_report(
+    prompts, before, after, pre_hidden=None, post_hidden=None, layer=None
+):
     pre_text, pre_lp = before
     post_text, post_lp = after
-    if not all(len(values) == len(prompts) for values in [pre_text, post_text, pre_lp, post_lp]):
+    if not all(
+        len(values) == len(prompts) for values in [pre_text, post_text, pre_lp, post_lp]
+    ):
         raise ValueError("Neighborhood measurements must align with prompts.")
-    projections = _project_drift(pre_hidden, post_hidden) if pre_hidden is not None and len(prompts) else [{} for _ in prompts]
+    projections = (
+        _project_drift(pre_hidden, post_hidden)
+        if pre_hidden is not None and len(prompts)
+        else [{} for _ in prompts]
+    )
     return [
-        {"prompt": prompt, "pre_text": pre_text[i], "post_text": post_text[i],
-         "kl_divergence": _kl_divergence([post_lp[i]], [pre_lp[i]]),
-         "drift_layer": layer, **projections[i]}
+        {
+            "prompt": prompt,
+            "pre_text": pre_text[i],
+            "post_text": post_text[i],
+            "kl_divergence": _kl_divergence([post_lp[i]], [pre_lp[i]]),
+            "drift_layer": layer,
+            **projections[i],
+        }
         for i, prompt in enumerate(prompts)
     ]
 
@@ -830,15 +914,21 @@ def run_memit_edit(
     os.chdir("/root/memit")
     sys.path.insert(0, "/root/memit")
 
+    from memit import MEMITHyperParams, apply_memit_to_model
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    from memit import MEMITHyperParams, apply_memit_to_model
     generate_fast = _generate_text
 
     print(f"Loading {model_name}...")
     tok = AutoTokenizer.from_pretrained(model_name)
     tok.pad_token = tok.eos_token
-    model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=_model_dtype(model_name)).to("cuda").eval()
+    model = (
+        AutoModelForCausalLM.from_pretrained(
+            model_name, torch_dtype=_model_dtype(model_name)
+        )
+        .to("cuda")
+        .eval()
+    )
 
     prompt_filled = prompt.format(subject)
 
@@ -852,8 +942,14 @@ def run_memit_edit(
     if target_true:
         print("Computing pre-edit ES/PS/NS/S metrics...")
         pre_metrics = _evaluate_edit(
-            model, tok, prompt, subject, target_new, target_true,
-            paraphrase_prompts, neighborhood_prompts,
+            model,
+            tok,
+            prompt,
+            subject,
+            target_new,
+            target_true,
+            paraphrase_prompts,
+            neighborhood_prompts,
         )
 
     hparams = MEMITHyperParams.from_json(_hparams_path("memit", model_name))
@@ -870,7 +966,9 @@ def run_memit_edit(
                 f"Layer(s) {bad} out of range for {model_name} (has {n_layers} layers, "
                 f"valid range 0-{n_layers - 1})."
             )
-        print(f"Overriding MEMIT's default preset {hparams.layers} with user-selected layers {layers}")
+        print(
+            f"Overriding MEMIT's default preset {hparams.layers} with user-selected layers {layers}"
+        )
         hparams.layers = layers
 
     print(f"Applying MEMIT to layers {hparams.layers}...")
@@ -890,8 +988,14 @@ def run_memit_edit(
         if target_true:
             print("Computing post-edit ES/PS/NS/S metrics...")
             post_metrics = _evaluate_edit(
-                model, tok, prompt, subject, target_new, target_true,
-                paraphrase_prompts, neighborhood_prompts,
+                model,
+                tok,
+                prompt,
+                subject,
+                target_new,
+                target_true,
+                paraphrase_prompts,
+                neighborhood_prompts,
             )
     finally:
         # Always revert to original weights, even if extraction above fails,
@@ -950,15 +1054,21 @@ def compare_layer_schemes(
     os.chdir("/root/memit")
     sys.path.insert(0, "/root/memit")
 
+    from memit import MEMITHyperParams, apply_memit_to_model
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    from memit import MEMITHyperParams, apply_memit_to_model
     generate_fast = _generate_text
 
     print(f"Loading {model_name}...")
     tok = AutoTokenizer.from_pretrained(model_name)
     tok.pad_token = tok.eos_token
-    model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=_model_dtype(model_name)).to("cuda").eval()
+    model = (
+        AutoModelForCausalLM.from_pretrained(
+            model_name, torch_dtype=_model_dtype(model_name)
+        )
+        .to("cuda")
+        .eval()
+    )
 
     n_layers = model.config.n_layer
     schemes = [_normalize_scheme(s) for s in schemes]
@@ -979,8 +1089,14 @@ def compare_layer_schemes(
     if target_true:
         print("Computing baseline (pre-edit) ES/PS/NS/S metrics...")
         baseline_metrics = _evaluate_edit(
-            model, tok, prompt, subject, target_new, target_true,
-            paraphrase_prompts, neighborhood_prompts,
+            model,
+            tok,
+            prompt,
+            subject,
+            target_new,
+            target_true,
+            paraphrase_prompts,
+            neighborhood_prompts,
         )
     baseline_generation = generate_fast(model, tok, [rewrite_prompt], max_out_len=60)[0]
 
@@ -1003,10 +1119,18 @@ def compare_layer_schemes(
             metrics = None
             if target_true:
                 metrics = _evaluate_edit(
-                    edited_model, tok, prompt, subject, target_new, target_true,
-                    paraphrase_prompts, neighborhood_prompts,
+                    edited_model,
+                    tok,
+                    prompt,
+                    subject,
+                    target_new,
+                    target_true,
+                    paraphrase_prompts,
+                    neighborhood_prompts,
                 )
-            generation = generate_fast(edited_model, tok, [rewrite_prompt], max_out_len=60)[0]
+            generation = generate_fast(
+                edited_model, tok, [rewrite_prompt], max_out_len=60
+            )[0]
 
             results.append(
                 {
@@ -1065,14 +1189,19 @@ def batch_compare_schemes(
     os.chdir("/root/memit")
     sys.path.insert(0, "/root/memit")
 
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
     from memit import MEMITHyperParams, apply_memit_to_model
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     print(f"Loading {model_name}...")
     tok = AutoTokenizer.from_pretrained(model_name)
     tok.pad_token = tok.eos_token
-    model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=_model_dtype(model_name)).to("cuda").eval()
+    model = (
+        AutoModelForCausalLM.from_pretrained(
+            model_name, torch_dtype=_model_dtype(model_name)
+        )
+        .to("cuda")
+        .eval()
+    )
 
     n_layers = model.config.n_layer
     schemes = [_normalize_scheme(s) for s in schemes]
@@ -1104,8 +1233,14 @@ def batch_compare_schemes(
         baseline_metrics = None
         if target_true:
             baseline_metrics = _evaluate_edit(
-                model, tok, prompt, subject, target_new, target_true,
-                paraphrase_prompts, neighborhood_prompts,
+                model,
+                tok,
+                prompt,
+                subject,
+                target_new,
+                target_true,
+                paraphrase_prompts,
+                neighborhood_prompts,
             )
 
         request = [
@@ -1126,12 +1261,20 @@ def batch_compare_schemes(
                 metrics = None
                 if target_true:
                     metrics = _evaluate_edit(
-                        edited_model, tok, prompt, subject, target_new, target_true,
-                        paraphrase_prompts, neighborhood_prompts,
+                        edited_model,
+                        tok,
+                        prompt,
+                        subject,
+                        target_new,
+                        target_true,
+                        paraphrase_prompts,
+                        neighborhood_prompts,
                     )
 
                 weight_drift = _compute_weight_drift(edited_model, orig_weights)
-                scheme_results.append({"layers": scheme, "metrics": metrics, "weight_drift": weight_drift})
+                scheme_results.append(
+                    {"layers": scheme, "metrics": metrics, "weight_drift": weight_drift}
+                )
             finally:
                 _restore_weights(edited_model, orig_weights)
 
@@ -1190,11 +1333,15 @@ def batch(
     if not parsed_schemes:
         raise ValueError(f"No valid schemes parsed from {schemes!r}")
 
-    print(f"Sweeping {len(facts)} facts x {len(parsed_schemes)} schemes "
-          f"= {len(facts) * len(parsed_schemes)} edits total")
+    print(
+        f"Sweeping {len(facts)} facts x {len(parsed_schemes)} schemes "
+        f"= {len(facts) * len(parsed_schemes)} edits total"
+    )
 
     result = batch_compare_schemes.remote(
-        facts=facts, schemes=parsed_schemes, model_name=model_name,
+        facts=facts,
+        schemes=parsed_schemes,
+        model_name=model_name,
     )
 
     _write_json(out, result)
@@ -1205,7 +1352,9 @@ def batch(
 
     for fact_result in result["facts"]:
         fact = fact_result["fact"]
-        print(f"\n=== {fact['prompt'].format(fact['subject'])} -> {fact['target_new']} ===")
+        print(
+            f"\n=== {fact['prompt'].format(fact['subject'])} -> {fact['target_new']} ==="
+        )
         for s in fact_result["schemes"]:
             m = s["metrics"] or {}
             print(
@@ -1242,7 +1391,9 @@ def main(
     if parsed_layers is not None:
         print(f"Using user-specified layers: {parsed_layers}")
     else:
-        print("No --layers given; using MEMIT's default hardcoded preset for this model.")
+        print(
+            "No --layers given; using MEMIT's default hardcoded preset for this model."
+        )
 
     parsed_paraphrase = _parse_prompt_list(paraphrase_prompts)
     parsed_neighborhood = _parse_prompt_list(neighborhood_prompts)
@@ -1277,11 +1428,11 @@ def main(
     def fmt_metrics(m):
         if m is None:
             return "  (skipped -- no --target_true given)"
+
         def f(x):
             return f"{x:.2f}" if x is not None else "n/a"
-        return (
-            f"  ES={f(m['ES'])}  PS={f(m['PS'])}  NS={f(m['NS'])}  S={f(m['S'])}"
-        )
+
+        return f"  ES={f(m['ES'])}  PS={f(m['PS'])}  NS={f(m['NS'])}  S={f(m['S'])}"
 
     print("\n=== Metrics (before edit) ===")
     print(fmt_metrics(result["pre_edit"]["metrics"]))
@@ -1409,15 +1560,16 @@ def web_app():
     os.chdir("/root/memit")
     sys.path.insert(0, "/root/memit")
 
+    from typing import Literal
+
+    from editing_optimizations import OPTIMIZATION_PROFILES
     from fastapi import FastAPI, HTTPException, Query
     from fastapi.middleware.cors import CORSMiddleware
+    from memit import MEMITHyperParams, apply_memit_to_model
     from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
-    from typing import Literal
+    from rome import ROMEHyperParams, apply_rome_to_model
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    from memit import MEMITHyperParams, apply_memit_to_model
-    from rome import ROMEHyperParams, apply_rome_to_model
-    from editing_optimizations import OPTIMIZATION_PROFILES
     generate_fast = _generate_text
 
     import torch
@@ -1443,7 +1595,13 @@ def web_app():
         print(f"[web_app] Loading {model_name}...")
         tok = AutoTokenizer.from_pretrained(model_name)
         tok.pad_token = tok.eos_token
-        model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=_model_dtype(model_name)).to("cuda").eval()
+        model = (
+            AutoModelForCausalLM.from_pretrained(
+                model_name, torch_dtype=_model_dtype(model_name)
+            )
+            .to("cuda")
+            .eval()
+        )
         _state["model_name"] = model_name
         _state["model"] = model
         _state["tok"] = tok
@@ -1472,20 +1630,28 @@ def web_app():
             parsed = list(Formatter().parse(self.prompt))
             if any("{" in literal or "}" in literal for literal, _, _, _ in parsed):
                 raise ValueError("Literal braces are not supported in prompts.")
-            fields = [(name, spec, conversion) for _, name, spec, conversion in parsed if name is not None]
+            fields = [
+                (name, spec, conversion)
+                for _, name, spec, conversion in parsed
+                if name is not None
+            ]
             if fields and fields != [("", "", None)]:
                 raise ValueError("Use exactly one plain {} subject placeholder.")
             if not fields:
                 if "{" in self.prompt or "}" in self.prompt:
                     raise ValueError("Literal braces are not supported in prompts.")
-                self.prompt = self.prompt.replace(self.subject, "{}", 1) if self.subject in self.prompt else "{} " + self.prompt
+                self.prompt = (
+                    self.prompt.replace(self.subject, "{}", 1)
+                    if self.subject in self.prompt
+                    else "{} " + self.prompt
+                )
             return self
 
     class FactRequest(ProbeRequest):
         target_new: str = Field(min_length=1)
         target_true: str | None = None
-        paraphrase_prompts: list[str] = []
-        neighborhood_prompts: list[str] = []
+        paraphrase_prompts: list[str] = Field(default_factory=list)
+        neighborhood_prompts: list[str] = Field(default_factory=list)
         neighborhood_targets: list[str] | None = None
         generation_prompts: list[str] | None = None
         damage_prompts: list[str] | None = None
@@ -1503,7 +1669,12 @@ def web_app():
         def original_target(cls, value):
             return value.strip() or None if value is not None else None
 
-        @field_validator("paraphrase_prompts", "neighborhood_prompts", "generation_prompts", "damage_prompts")
+        @field_validator(
+            "paraphrase_prompts",
+            "neighborhood_prompts",
+            "generation_prompts",
+            "damage_prompts",
+        )
         @classmethod
         def prompts(cls, values):
             if values is not None and any(not value.strip() for value in values):
@@ -1519,16 +1690,32 @@ def web_app():
 
         @model_validator(mode="after")
         def aligned_neighbors(self):
-            if self.neighborhood_targets is not None and len(self.neighborhood_targets) != len(self.neighborhood_prompts):
-                raise ValueError("Neighborhood targets must align with neighborhood prompts.")
+            if self.neighborhood_targets is not None and len(
+                self.neighborhood_targets
+            ) != len(self.neighborhood_prompts):
+                raise ValueError(
+                    "Neighborhood targets must align with neighborhood prompts."
+                )
             return self
 
     class EditRequest(FactRequest):
-        optimization: Literal["standard", "context", "context_v3", "standard_budget", "context_no_consistency"] = "standard"
+        optimization: Literal[
+            "standard",
+            "context",
+            "context_v3",
+            "standard_budget",
+            "context_no_consistency",
+        ] = "standard"
         layers: list[StrictInt] | None = Field(default=None, min_length=1)
 
     class CompareRequest(FactRequest):
-        optimization: Literal["standard", "context", "context_v3", "standard_budget", "context_no_consistency"] = "standard"
+        optimization: Literal[
+            "standard",
+            "context",
+            "context_v3",
+            "standard_budget",
+            "context_no_consistency",
+        ] = "standard"
         schemes: list[list[StrictInt]] = Field(min_length=1)
 
         @field_validator("schemes")
@@ -1550,13 +1737,18 @@ def web_app():
                 f"(has {n_layers} layers, valid range 0-{n_layers - 1}).",
             )
 
-    def _apply_edit(method, model, tok, request_, layers, model_name, optimization="standard"):
+    def _apply_edit(
+        method, model, tok, request_, layers, model_name, optimization="standard"
+    ):
         """Dispatch to MEMIT or ROME based on method string."""
         if method not in SUPPORTED_METHODS:
             raise HTTPException(status_code=400, detail="Unsupported editing method.")
         if method == "rome":
             if optimization != "standard":
-                raise HTTPException(status_code=400, detail="Context optimization is available for MEMIT only.")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Context optimization is available for MEMIT only.",
+                )
             if len(layers) != 1:
                 raise HTTPException(
                     status_code=400,
@@ -1575,19 +1767,30 @@ def web_app():
             _seed_memit_rng()
             if optimization in ("context", "context_v3"):
                 from editing_optimizations import apply_context_memit, configure_context
+
                 configure_context(hparams, "context_v3")
-                return _apply_with_rollback(apply_context_memit, model, tok, request_, hparams)
+                return _apply_with_rollback(
+                    apply_context_memit, model, tok, request_, hparams
+                )
             elif optimization == "context_no_consistency":
                 from editing_optimizations import apply_context_memit, configure_context
+
                 configure_context(hparams, "context_no_consistency")
-                return _apply_with_rollback(apply_context_memit, model, tok, request_, hparams)
+                return _apply_with_rollback(
+                    apply_context_memit, model, tok, request_, hparams
+                )
             elif optimization == "standard_budget":
                 from editing_optimizations import configure_context
+
                 configure_context(hparams, "standard_budget")
                 # Upstream's final loop iteration skips optimizer.step(); its
                 # 41 forwards allow the same maximum 40 updates as local context.
-                hparams.v_num_grad_steps += OPTIMIZATION_PROFILES["standard_budget"]["upstream_final_iteration_compensation"]
-                return _apply_with_rollback(apply_memit_to_model, model, tok, request_, hparams)
+                hparams.v_num_grad_steps += OPTIMIZATION_PROFILES["standard_budget"][
+                    "upstream_final_iteration_compensation"
+                ]
+                return _apply_with_rollback(
+                    apply_memit_to_model, model, tok, request_, hparams
+                )
             return _apply_with_rollback(
                 apply_memit_to_model, model, tok, request_, hparams
             )
@@ -1642,8 +1845,11 @@ def web_app():
     def generate(body: ProbeRequest):
         model, tok = _ensure_model(body.model)
         prompt = body.prompt.format(body.subject)
-        return {"model": body.model, "prompt": prompt,
-                "generation": _generate_text(model, tok, [prompt], max_out_len=60)[0]}
+        return {
+            "model": body.model,
+            "prompt": prompt,
+            "generation": _generate_text(model, tok, [prompt], max_out_len=60)[0],
+        }
 
     @web.post("/edit")
     def edit(body: EditRequest):
@@ -1657,7 +1863,9 @@ def web_app():
             cls = ROMEHyperParams if body.method == "rome" else MEMITHyperParams
             layers = cls.from_json(_hparams_path(body.method, model_name)).layers
         drift_layer = max(layers)
-        pre_hidden = _hidden_states(model, tok, body.neighborhood_prompts, [drift_layer])
+        pre_hidden = _hidden_states(
+            model, tok, body.neighborhood_prompts, [drift_layer]
+        )
         rewrite_prompt = body.prompt.format(body.subject)
         generation_prompts = body.generation_prompts or [rewrite_prompt]
         damage_prompts = body.damage_prompts or DAMAGE_REF_PROMPTS
@@ -1669,18 +1877,28 @@ def web_app():
         # different reference strings and cannot be compared.
         pre_metrics = (
             _evaluate_edit(
-                model, tok, body.prompt, body.subject, body.target_new,
-                body.target_true, body.paraphrase_prompts, body.neighborhood_prompts,
+                model,
+                tok,
+                body.prompt,
+                body.subject,
+                body.target_new,
+                body.target_true,
+                body.paraphrase_prompts,
+                body.neighborhood_prompts,
                 neighborhood_targets=body.neighborhood_targets,
             )
-            if body.target_true else None
+            if body.target_true
+            else None
         )
         orig_damage_lp = _damage_logprobs(model, tok, damage_prompts)
         pre_neighborhood = _neighborhood_snapshot(model, tok, body.neighborhood_prompts)
 
         request_ = [
-            {"prompt": body.prompt, "subject": body.subject,
-             "target_new": {"str": body.target_new}}
+            {
+                "prompt": body.prompt,
+                "subject": body.subject,
+                "target_new": {"str": body.target_new},
+            }
         ]
 
         edited_model, orig_weights = _apply_edit(
@@ -1688,23 +1906,37 @@ def web_app():
         )
 
         try:
-            post_signals = _probe_layers(edited_model, tok, rewrite_prompt, body.subject)
-            post_text = generate_fast(edited_model, tok, generation_prompts, max_out_len=80)
+            post_signals = _probe_layers(
+                edited_model, tok, rewrite_prompt, body.subject
+            )
+            post_text = generate_fast(
+                edited_model, tok, generation_prompts, max_out_len=80
+            )
             post_metrics = (
                 _evaluate_edit(
-                    edited_model, tok, body.prompt, body.subject, body.target_new,
-                    body.target_true, body.paraphrase_prompts, body.neighborhood_prompts,
+                    edited_model,
+                    tok,
+                    body.prompt,
+                    body.subject,
+                    body.target_new,
+                    body.target_true,
+                    body.paraphrase_prompts,
+                    body.neighborhood_prompts,
                     neighborhood_targets=body.neighborhood_targets,
                 )
-                if body.target_true else None
+                if body.target_true
+                else None
             )
             edited_damage_lp = _damage_logprobs(edited_model, tok, damage_prompts)
             damage_kl = _kl_divergence(edited_damage_lp, orig_damage_lp)
             neighborhood = _neighborhood_report(
-                body.neighborhood_prompts, pre_neighborhood,
+                body.neighborhood_prompts,
+                pre_neighborhood,
                 _neighborhood_snapshot(edited_model, tok, body.neighborhood_prompts),
                 pre_hidden.get(drift_layer),
-                _hidden_states(edited_model, tok, body.neighborhood_prompts, [drift_layer]).get(drift_layer),
+                _hidden_states(
+                    edited_model, tok, body.neighborhood_prompts, [drift_layer]
+                ).get(drift_layer),
                 drift_layer,
             )
             weight_drift = _compute_weight_drift(edited_model, orig_weights)
@@ -1761,23 +1993,37 @@ def web_app():
         # Same neighborhood-target convention as the per-scheme metrics below.
         baseline_metrics = (
             _evaluate_edit(
-                model, tok, body.prompt, body.subject, body.target_new,
-                body.target_true, body.paraphrase_prompts, body.neighborhood_prompts,
+                model,
+                tok,
+                body.prompt,
+                body.subject,
+                body.target_new,
+                body.target_true,
+                body.paraphrase_prompts,
+                body.neighborhood_prompts,
                 neighborhood_targets=body.neighborhood_targets,
             )
-            if body.target_true else None
+            if body.target_true
+            else None
         )
-        baseline_generation = generate_fast(model, tok, [rewrite_prompt], max_out_len=60)[0]
+        baseline_generation = generate_fast(
+            model, tok, [rewrite_prompt], max_out_len=60
+        )[0]
         orig_damage_lp = _damage_logprobs(model, tok, damage_prompts)
         pre_neighborhood = _neighborhood_snapshot(model, tok, body.neighborhood_prompts)
 
         request_ = [
-            {"prompt": body.prompt, "subject": body.subject,
-             "target_new": {"str": body.target_new}}
+            {
+                "prompt": body.prompt,
+                "subject": body.subject,
+                "target_new": {"str": body.target_new},
+            }
         ]
 
         results = []
-        pre_hidden = _hidden_states(model, tok, body.neighborhood_prompts, sorted(set(max(s) for s in schemes)))
+        pre_hidden = _hidden_states(
+            model, tok, body.neighborhood_prompts, sorted({max(s) for s in schemes})
+        )
         for scheme in schemes:
             edited_model, orig_weights = _apply_edit(
                 body.method, model, tok, request_, scheme, model_name, body.optimization
@@ -1786,33 +2032,51 @@ def web_app():
             try:
                 metrics = (
                     _evaluate_edit(
-                        edited_model, tok, body.prompt, body.subject, body.target_new,
-                        body.target_true, body.paraphrase_prompts, body.neighborhood_prompts,
+                        edited_model,
+                        tok,
+                        body.prompt,
+                        body.subject,
+                        body.target_new,
+                        body.target_true,
+                        body.paraphrase_prompts,
+                        body.neighborhood_prompts,
                         neighborhood_targets=body.neighborhood_targets,
                     )
-                    if body.target_true else None
+                    if body.target_true
+                    else None
                 )
-                generation = generate_fast(edited_model, tok, [rewrite_prompt], max_out_len=60)[0]
+                generation = generate_fast(
+                    edited_model, tok, [rewrite_prompt], max_out_len=60
+                )[0]
                 edited_damage_lp = _damage_logprobs(edited_model, tok, damage_prompts)
                 damage_kl = _kl_divergence(edited_damage_lp, orig_damage_lp)
                 neighborhood = _neighborhood_report(
-                    body.neighborhood_prompts, pre_neighborhood,
-                    _neighborhood_snapshot(edited_model, tok, body.neighborhood_prompts),
+                    body.neighborhood_prompts,
+                    pre_neighborhood,
+                    _neighborhood_snapshot(
+                        edited_model, tok, body.neighborhood_prompts
+                    ),
                     pre_hidden.get(max(scheme)),
-                    _hidden_states(edited_model, tok, body.neighborhood_prompts, [max(scheme)]).get(max(scheme)),
+                    _hidden_states(
+                        edited_model, tok, body.neighborhood_prompts, [max(scheme)]
+                    ).get(max(scheme)),
                     max(scheme),
                 )
 
                 weight_drift = _compute_weight_drift(edited_model, orig_weights)
-                results.append({
-                    "layers": scheme,
-                    "layer_signals": _probe_layers(edited_model, tok, rewrite_prompt, body.subject),
-                    "metrics": metrics,
-                    "weight_drift": weight_drift,
-                    "generation": generation,
-                    "damage": _damage_report(damage_kl, damage_prompts),
-                    "neighborhood": neighborhood,
-                })
+                results.append(
+                    {
+                        "layers": scheme,
+                        "layer_signals": _probe_layers(
+                            edited_model, tok, rewrite_prompt, body.subject
+                        ),
+                        "metrics": metrics,
+                        "weight_drift": weight_drift,
+                        "generation": generation,
+                        "damage": _damage_report(damage_kl, damage_prompts),
+                        "neighborhood": neighborhood,
+                    }
+                )
             finally:
                 _restore_weights(edited_model, orig_weights)
 
