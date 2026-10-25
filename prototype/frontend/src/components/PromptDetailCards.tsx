@@ -24,8 +24,13 @@ export const PromptDetailCards: React.FC<Props> = ({
   generations = [],
   metrics,
 }) => {
+  // Bug 5 fix: use a global regex replace so ALL `{}` placeholders are
+  // substituted, matching Python's str.format() behavior. The original
+  // String.replace("{}", subject) only replaced the first occurrence, causing
+  // the prefix match in per-prompt pass/fail indicators to silently return
+  // "eval-unknown" for any prompt containing more than one `{}`.
   const filledPrompt = prompt.includes("{}")
-    ? prompt.replace("{}", subject)
+    ? prompt.replace(/\{\}/g, subject)
     : prompt.includes(subject) ? prompt : `${subject} ${prompt}`;
 
   // Evaluate real pass/fail state based on metrics if available

@@ -740,7 +740,15 @@ def _neighborhood_report(prompts, before, after, pre_hidden=None, post_hidden=No
     post_text, post_lp = after
     if not all(len(values) == len(prompts) for values in [pre_text, post_text, pre_lp, post_lp]):
         raise ValueError("Neighborhood measurements must align with prompts.")
-    projections = _project_drift(pre_hidden, post_hidden) if pre_hidden is not None and len(prompts) else [{} for _ in prompts]
+    # Bug 3/8 fix: guard both pre_hidden and post_hidden before calling
+    # _project_drift. When neighborhood_prompts is non-empty but _hidden_states
+    # returns an empty dict (e.g. drift layer out of range), post_hidden is None
+    # and _project_drift would crash on None.shape.
+    projections = (
+        _project_drift(pre_hidden, post_hidden)
+        if pre_hidden is not None and post_hidden is not None and len(prompts)
+        else [{} for _ in prompts]
+    )
     return [
         {"prompt": prompt, "pre_text": pre_text[i], "post_text": post_text[i],
          "kl_divergence": _kl_divergence([post_lp[i]], [pre_lp[i]]),
@@ -1575,7 +1583,11 @@ def web_app():
             _seed_memit_rng()
             if optimization in ("context", "context_v3"):
                 from editing_optimizations import apply_context_memit, configure_context
-                configure_context(hparams, "context_v3")
+                # Bug 2 fix: pass the actual optimization profile string instead of
+                # always hardcoding "context_v3". Both "context" and "context_v3"
+                # currently map to identical profiles, but hardcoding silently breaks
+                # the moment those profiles diverge.
+                configure_context(hparams, optimization)
                 return _apply_with_rollback(apply_context_memit, model, tok, request_, hparams)
             elif optimization == "context_no_consistency":
                 from editing_optimizations import apply_context_memit, configure_context
@@ -1604,9 +1616,16 @@ def web_app():
         return {"revision": str(profile)}
 
     web = FastAPI(title="KEditVis API")
+    # Bug 12 fix: wildcard CORS lets any website trigger expensive GPU-backed
+    # edits, wasting Modal credits and exposing the mutation endpoints.
+    # Read the allowed origin from the environment so production deployments
+    # can restrict it without a code change; fall back to "*" only for local
+    # dev where no KEDITVIS_ALLOWED_ORIGIN is set.
+    import os as _os
+    _allowed_origin = _os.environ.get("KEDITVIS_ALLOWED_ORIGIN", "*")
     web.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=[_allowed_origin],
         allow_methods=["*"],
         allow_headers=["*"],
     )

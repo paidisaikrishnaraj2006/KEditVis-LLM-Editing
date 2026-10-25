@@ -71,6 +71,9 @@ def configure_context(hp, profile: str = "context_v3"):
         )
     prof = OPTIMIZATION_PROFILES[profile]
     hp.context_consistency = prof["consistency_weight"]
+    # Bug 9 fix: store monitor_layers on hp so compute_context_target reads the
+    # active profile's value rather than the hardcoded CONTEXT_PROFILE constant.
+    hp.monitor_layers = prof["monitor_layers"]
     if prof["minimum_clamp_norm_factor"] is not None:
         hp.clamp_norm_factor = max(hp.clamp_norm_factor, prof["minimum_clamp_norm_factor"])
     if prof["minimum_gradient_steps"] is not None:
@@ -117,7 +120,9 @@ def compute_context_target(model, tok, request, hp, layer, contexts):
     indices = [find_fact_lookup_idx(p, request["subject"], tok, hp.fact_token, verbose=False) for p in all_prompts]
     loss_layer = max(layer, hp.v_loss_layer)
     consistency_wt = getattr(hp, "context_consistency", CONTEXT_PROFILE["consistency_weight"])
-    monitor_count = CONTEXT_PROFILE["monitor_layers"] if consistency_wt > 0.0 else 0
+    # Bug 9 fix: read monitor_layers from the active profile stored on hp by
+    # configure_context, not from the hardcoded CONTEXT_PROFILE constant.
+    monitor_count = getattr(hp, "monitor_layers", CONTEXT_PROFILE["monitor_layers"]) if consistency_wt > 0.0 else 0
     monitors = list(range(layer + 1, min(model.config.n_layer, layer + 1 + monitor_count))) if monitor_count > 0 else []
     traced = list(dict.fromkeys([layer, loss_layer, *monitors]))
     delta = torch.zeros(model.config.n_embd, device=device, requires_grad=True)
@@ -158,7 +163,11 @@ def compute_context_target(model, tok, request, hp, layer, contexts):
             current_kl = logits[-1, indices[-1]].float().log_softmax(-1)
             if baseline_kl is None:
                 baseline_kl = current_kl.detach().clone()
-            kl = torch.nn.functional.kl_div(baseline_kl, current_kl, log_target=True, reduction="sum")
+            # Bug 1 fix: kl_div(input, target) — input must be the approximation
+            # (current_kl) and target the reference (baseline_kl). The original
+            # call had the arguments swapped, computing KL(baseline‖current)
+            # instead of the intended KL(current‖baseline).
+            kl = torch.nn.functional.kl_div(current_kl, baseline_kl, log_target=True, reduction="sum")
             decay = hp.v_weight_decay * delta.norm() / initial.norm().square().clamp_min(1e-12)
             consistency = delta.new_zeros(())
             if monitors and consistency_wt > 0.0:

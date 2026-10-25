@@ -97,7 +97,10 @@ export function CosineSimilarityCompareChart({
       .attr("font-family", "var(--font-mono)")
       .attr("fill", (d) => (edited.has(d.layer) ? "#EF4444" : "#64748B"))
       .attr("font-weight", (d) => (edited.has(d.layer) ? 700 : 400))
-      .text((d) => (d.layer % 4 === 0 || d.layer === rows.length - 1 ? d.layer : ""));
+      // Bug 6 fix: compare against the actual last row's layer number, not
+      // rows.length - 1. When measurements are filtered out, rows.length no
+      // longer equals the total layer count, so the last label disappears.
+      .text((d) => (d.layer % 4 === 0 || d.layer === rows[rows.length - 1].layer ? d.layer : ""));
   }, [preSignals, postSignals, editedLayers, signalMode]);
 
   if (preSignals.length === 0 || postSignals.length === 0) {
