@@ -740,7 +740,7 @@ def _neighborhood_report(prompts, before, after, pre_hidden=None, post_hidden=No
     post_text, post_lp = after
     if not all(len(values) == len(prompts) for values in [pre_text, post_text, pre_lp, post_lp]):
         raise ValueError("Neighborhood measurements must align with prompts.")
-    projections = _project_drift(pre_hidden, post_hidden) if pre_hidden is not None and len(prompts) else [{} for _ in prompts]
+    projections = _project_drift(pre_hidden, post_hidden) if pre_hidden is not None and post_hidden is not None and len(prompts) else [{} for _ in prompts]
     return [
         {"prompt": prompt, "pre_text": pre_text[i], "post_text": post_text[i],
          "kl_divergence": _kl_divergence([post_lp[i]], [pre_lp[i]]),
