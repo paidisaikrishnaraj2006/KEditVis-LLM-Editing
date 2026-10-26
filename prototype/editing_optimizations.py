@@ -158,7 +158,7 @@ def compute_context_target(model, tok, request, hp, layer, contexts):
             current_kl = logits[-1, indices[-1]].float().log_softmax(-1)
             if baseline_kl is None:
                 baseline_kl = current_kl.detach().clone()
-            kl = torch.nn.functional.kl_div(baseline_kl, current_kl, log_target=True, reduction="sum")
+            kl = torch.nn.functional.kl_div(current_kl, baseline_kl, log_target=True, reduction="sum")
             decay = hp.v_weight_decay * delta.norm() / initial.norm().square().clamp_min(1e-12)
             consistency = delta.new_zeros(())
             if monitors and consistency_wt > 0.0:
