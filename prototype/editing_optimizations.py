@@ -71,6 +71,7 @@ def configure_context(hp, profile: str = "context_v3"):
         )
     prof = OPTIMIZATION_PROFILES[profile]
     hp.context_consistency = prof["consistency_weight"]
+    hp.monitor_layers = prof["monitor_layers"]
     if prof["minimum_clamp_norm_factor"] is not None:
         hp.clamp_norm_factor = max(hp.clamp_norm_factor, prof["minimum_clamp_norm_factor"])
     if prof["minimum_gradient_steps"] is not None:
@@ -117,7 +118,7 @@ def compute_context_target(model, tok, request, hp, layer, contexts):
     indices = [find_fact_lookup_idx(p, request["subject"], tok, hp.fact_token, verbose=False) for p in all_prompts]
     loss_layer = max(layer, hp.v_loss_layer)
     consistency_wt = getattr(hp, "context_consistency", CONTEXT_PROFILE["consistency_weight"])
-    monitor_count = CONTEXT_PROFILE["monitor_layers"] if consistency_wt > 0.0 else 0
+    monitor_count = getattr(hp, "monitor_layers", CONTEXT_PROFILE["monitor_layers"]) if consistency_wt > 0.0 else 0
     monitors = list(range(layer + 1, min(model.config.n_layer, layer + 1 + monitor_count))) if monitor_count > 0 else []
     traced = list(dict.fromkeys([layer, loss_layer, *monitors]))
     delta = torch.zeros(model.config.n_embd, device=device, requires_grad=True)
