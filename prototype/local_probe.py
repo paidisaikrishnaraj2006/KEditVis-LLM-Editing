@@ -83,6 +83,7 @@ def probe_layers(model, tok, prompt_filled: str, subject: str, top_k: int = 5):
                 "input": inputs[0].detach(),
                 "output": output.detach(),
             }
+
         return hook
 
     # We also want the *residual stream* (block output, not just MLP output)
@@ -94,6 +95,7 @@ def probe_layers(model, tok, prompt_filled: str, subject: str, top_k: int = 5):
         def hook(module, inputs, output):
             hs = output[0] if isinstance(output, tuple) else output
             residuals[name] = hs.detach()
+
         return hook
 
     modules = dict(model.named_modules())
@@ -174,7 +176,9 @@ def probe_layers(model, tok, prompt_filled: str, subject: str, top_k: int = 5):
 
 def print_ascii_chart(data: dict, bar_width: int = 40):
     """Quick-and-dirty terminal visualization, no frontend needed yet."""
-    print(f"\nPrompt: {data['prompt']!r}  (subject token idx={data['subject_token_index']})\n")
+    print(
+        f"\nPrompt: {data['prompt']!r}  (subject token idx={data['subject_token_index']})\n"
+    )
     print(f"{'L':>3} | {'cos_sim':>8} | bar (longer = lower cos_sim = more 'active')")
     print("-" * 70)
     for layer in data["layers"]:
@@ -193,13 +197,22 @@ def print_ascii_chart(data: dict, bar_width: int = 40):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="gpt2-medium",
-                     help="e.g. gpt2, gpt2-medium, gpt2-large (gpt2-xl needs ~6GB+ VRAM)")
-    ap.add_argument("--prompt", default="{} is located in the city of",
-                     help="Prompt template with '{}' where the subject goes")
+    ap.add_argument(
+        "--model",
+        default="gpt2-medium",
+        help="e.g. gpt2, gpt2-medium, gpt2-large (gpt2-xl needs ~6GB+ VRAM)",
+    )
+    ap.add_argument(
+        "--prompt",
+        default="{} is located in the city of",
+        help="Prompt template with '{}' where the subject goes",
+    )
     ap.add_argument("--subject", default="Eiffel Tower")
-    ap.add_argument("--target", default=None,
-                     help="(Informational only, not used for editing in this script)")
+    ap.add_argument(
+        "--target",
+        default=None,
+        help="(Informational only, not used for editing in this script)",
+    )
     ap.add_argument("--top_k", type=int, default=5)
     ap.add_argument("--out", default=None, help="Optional path to dump JSON results")
     args = ap.parse_args()

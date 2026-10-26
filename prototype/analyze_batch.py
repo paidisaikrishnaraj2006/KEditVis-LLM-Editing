@@ -23,7 +23,9 @@ from analyze_schemes import (
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: python analyze_batch.py <audit/development/batch_comparison.json>")
+        print(
+            "Usage: python analyze_batch.py <audit/development/batch_comparison.json>"
+        )
         sys.exit(1)
 
     with open(sys.argv[1]) as f:
@@ -60,7 +62,7 @@ def main():
             try:
                 activity = scheme_activity_score(layer_signals, s["layers"])
             except ValueError as exc:
-                print(f"{str(s['layers']):<20} | skipped: {exc}")
+                print(f"{s['layers']!s:<20} | skipped: {exc}")
                 continue
             projection = (
                 scheme_projection_score(layer_signals, s["layers"], proj_target)
@@ -75,7 +77,7 @@ def main():
             span = str(projection["peak_span"]) if projection else "n/a"
             ovlp = fmt(projection["span_overlap"]) if projection else "n/a"
             print(
-                f"{str(s['layers']):<20} | {fmt(activity['mean_abs_cos_sim']):>10} | "
+                f"{s['layers']!s:<20} | {fmt(activity['mean_abs_cos_sim']):>10} | "
                 f"{fmt(activity['min_abs_cos_sim']):>9} | {span:>8} | {ovlp:>5} | "
                 f"{fmt(metrics.get('ES')):>5} | "
                 f"{fmt(metrics.get('PS')):>5} | {fmt(metrics.get('NS')):>5} | {fmt(metrics.get('S')):>5}"
@@ -98,7 +100,9 @@ def main():
 
     n_facts = len(data["facts"])
     n_total = len(pooled_rows)
-    print(f"\n\n=== Pooled analysis across {n_facts} facts x schemes ({n_total} data points) ===")
+    print(
+        f"\n\n=== Pooled analysis across {n_facts} facts x schemes ({n_total} data points) ==="
+    )
 
     # Cosine similarity (Sec 4.2.1) expects a NEGATIVE correlation with edit
     # success; token projection (Sec 4.2.2) expects a POSITIVE one.
@@ -118,11 +122,7 @@ def main():
                 continue
             xs, ys = zip(*pairs)
             rho = spearman_rank_correlation(list(xs), list(ys))
-            expect = (
-                "expect negative"
-                if "cos" in activity_name
-                else "expect positive"
-            )
+            expect = "expect negative" if "cos" in activity_name else "expect positive"
             print(
                 f"Spearman({activity_name}, {metric_name}) = {format_rho(rho)}"
                 f"  (n={len(pairs)}, {expect})"
@@ -132,7 +132,9 @@ def main():
     # useful signal that some facts are just harder to edit than others,
     # independent of layer selection (a separate axis KEditVis doesn't
     # directly address, but worth noting for a capstone discussion).
-    print("\n=== Facts where NO scheme achieved ES > 0 (edit failed regardless of layers) ===")
+    print(
+        "\n=== Facts where NO scheme achieved ES > 0 (edit failed regardless of layers) ==="
+    )
     by_fact = {}
     for r in pooled_rows:
         by_fact.setdefault(r["fact"], []).append(r["ES"])

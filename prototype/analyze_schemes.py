@@ -63,11 +63,15 @@ def target_token_probs(layer_signals: list, target: str) -> dict:
     t = _norm_token(target)
     probs = {}
     for l in _signals_by_layer(layer_signals).values():
-        tokens = l["last_top_tokens"] if "last_top_tokens" in l else l.get("top_tokens", [])
+        tokens = (
+            l["last_top_tokens"] if "last_top_tokens" in l else l.get("top_tokens", [])
+        )
         for tt in tokens:
             if _norm_token(tt["token"]) == t:
                 if not math.isfinite(tt["prob"]) or not 0 <= tt["prob"] <= 1:
-                    raise ValueError("Token probabilities must be finite and lie in [0, 1].")
+                    raise ValueError(
+                        "Token probabilities must be finite and lie in [0, 1]."
+                    )
                 probs[l["layer"]] = tt["prob"]
     return probs
 
@@ -122,10 +126,14 @@ def scheme_activity_score(layer_signals: list, scheme_layers: list) -> dict:
     scheme_layers = _scheme_layers(scheme_layers)
     missing = sorted(scheme_layers - by_layer.keys())
     if missing:
-        raise ValueError(f"Scheme requires layers missing from baseline signals: {missing}.")
+        raise ValueError(
+            f"Scheme requires layers missing from baseline signals: {missing}."
+        )
     cos_sims = [abs(by_layer[layer]["cosine_similarity"]) for layer in scheme_layers]
     if any(not math.isfinite(value) or value > 1.000001 for value in cos_sims):
-        raise ValueError("Cosine similarities must be finite and lie in [-1, 1] within float32 tolerance.")
+        raise ValueError(
+            "Cosine similarities must be finite and lie in [-1, 1] within float32 tolerance."
+        )
     return {
         "mean_abs_cos_sim": sum(cos_sims) / len(cos_sims),
         "min_abs_cos_sim": min(cos_sims),
@@ -193,12 +201,16 @@ def spearman_rank_correlation(xs: list, ys: list) -> float:
 
 def format_rho(rho: float) -> str:
     """Human-readable coefficient, distinguishing 'undefined' from a real value."""
-    return "undefined (zero variance in one input)" if math.isnan(rho) else f"{rho:+.3f}"
+    return (
+        "undefined (zero variance in one input)" if math.isnan(rho) else f"{rho:+.3f}"
+    )
 
 
 def main():
     if len(sys.argv) not in (2, 3):
-        print("Usage: python analyze_schemes.py <audit/development/scheme_comparison.json> [target_true]")
+        print(
+            "Usage: python analyze_schemes.py <audit/development/scheme_comparison.json> [target_true]"
+        )
         sys.exit(1)
 
     with open(sys.argv[1]) as f:
@@ -247,12 +259,13 @@ def main():
     print(header)
     print("-" * len(header))
     for r in rows:
+
         def f(x):
             return f"{x:.3f}" if x is not None else "n/a"
 
         span = str(r["peak_span"]) if r["peak_span"] else "n/a"
         print(
-            f"{str(r['layers']):<20} | {f(r['mean_abs_cos_sim']):>10} | "
+            f"{r['layers']!s:<20} | {f(r['mean_abs_cos_sim']):>10} | "
             f"{f(r['min_abs_cos_sim']):>9} | {span:>8} | {f(r['span_overlap']):>5} | "
             f"{f(r['max_prob']):>6} | {f(r['ES']):>5} | {f(r['PS']):>5} | {f(r['S']):>5}"
         )
@@ -261,7 +274,9 @@ def main():
     # outcome, so we expect a NEGATIVE correlation between mean/min |cos_sim| and ES/S.
     valid_es = [(r["mean_abs_cos_sim"], r["ES"]) for r in rows if r["ES"] is not None]
     valid_s = [(r["mean_abs_cos_sim"], r["S"]) for r in rows if r["S"] is not None]
-    valid_min_es = [(r["min_abs_cos_sim"], r["ES"]) for r in rows if r["ES"] is not None]
+    valid_min_es = [
+        (r["min_abs_cos_sim"], r["ES"]) for r in rows if r["ES"] is not None
+    ]
 
     # Hypothesis 2 (KEditVis Sec 4.2.2): schemes overlapping the object token's
     # peak-probability span do better, so we expect POSITIVE correlations.
@@ -288,17 +303,23 @@ def main():
     if len(valid_es) >= 2:
         xs, ys = zip(*valid_es)
         rho = spearman_rank_correlation(list(xs), list(ys))
-        print(f"Spearman(mean|cos_sim|, ES)     = {format_rho(rho)}  (expect negative if hypothesis holds)")
+        print(
+            f"Spearman(mean|cos_sim|, ES)     = {format_rho(rho)}  (expect negative if hypothesis holds)"
+        )
 
     if len(valid_min_es) >= 2:
         xs, ys = zip(*valid_min_es)
         rho = spearman_rank_correlation(list(xs), list(ys))
-        print(f"Spearman(min|cos_sim|,  ES)     = {format_rho(rho)}  (expect negative if hypothesis holds)")
+        print(
+            f"Spearman(min|cos_sim|,  ES)     = {format_rho(rho)}  (expect negative if hypothesis holds)"
+        )
 
     if len(valid_s) >= 2:
         xs, ys = zip(*valid_s)
         rho = spearman_rank_correlation(list(xs), list(ys))
-        print(f"Spearman(mean|cos_sim|, S)      = {format_rho(rho)}  (expect negative if hypothesis holds)")
+        print(
+            f"Spearman(mean|cos_sim|, S)      = {format_rho(rho)}  (expect negative if hypothesis holds)"
+        )
 
     if target_true is None:
         print(
@@ -314,17 +335,23 @@ def main():
         if len(valid_ovlp_es) >= 2:
             xs, ys = zip(*valid_ovlp_es)
             rho = spearman_rank_correlation(list(xs), list(ys))
-            print(f"Spearman(span_overlap,  ES)     = {format_rho(rho)}  (expect positive if hypothesis holds)")
+            print(
+                f"Spearman(span_overlap,  ES)     = {format_rho(rho)}  (expect positive if hypothesis holds)"
+            )
 
         if len(valid_maxp_es) >= 2:
             xs, ys = zip(*valid_maxp_es)
             rho = spearman_rank_correlation(list(xs), list(ys))
-            print(f"Spearman(maxP in scheme, ES)    = {format_rho(rho)}  (expect positive if hypothesis holds)")
+            print(
+                f"Spearman(maxP in scheme, ES)    = {format_rho(rho)}  (expect positive if hypothesis holds)"
+            )
 
         if len(valid_ovlp_s) >= 2:
             xs, ys = zip(*valid_ovlp_s)
             rho = spearman_rank_correlation(list(xs), list(ys))
-            print(f"Spearman(span_overlap,  S)      = {format_rho(rho)}  (expect positive if hypothesis holds)")
+            print(
+                f"Spearman(span_overlap,  S)      = {format_rho(rho)}  (expect positive if hypothesis holds)"
+            )
 
     print(
         "\nNote: with only a handful of schemes this is directional evidence, "

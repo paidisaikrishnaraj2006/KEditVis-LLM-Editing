@@ -10,12 +10,12 @@ Guarantees:
 - Provides matched static presets (published upstream defaults) and seeded random baselines.
 """
 
-from typing import List, Dict, Any, Optional
 import math
 import random
+from typing import Any
 
 
-def _model_spec(model_name: str, method: str, total_layers: Optional[int] = None):
+def _model_spec(model_name: str, method: str, total_layers: int | None = None):
     """Reject unknown models or invalid budgets instead of substituting GPT-2."""
     models = {"gpt2-xl": (48, 5), "eleutherai/gpt-j-6b": (28, 6)}
     try:
@@ -34,7 +34,7 @@ def _model_spec(model_name: str, method: str, total_layers: Optional[int] = None
     return n_layers, window
 
 
-def get_static_preset(model_name: str, method: str) -> List[int]:
+def get_static_preset(model_name: str, method: str) -> list[int]:
     """Returns the published hyperparameter layer preset for the model and method."""
     _model_spec(model_name, method)
     is_gptj = "gpt-j" in model_name.lower()
@@ -49,8 +49,8 @@ def get_random_scheme(
     model_name: str,
     method: str,
     seed: int,
-    total_layers: Optional[int] = None,
-) -> List[int]:
+    total_layers: int | None = None,
+) -> list[int]:
     """
     Returns a deterministic, seeded pseudo-random layer selection matched in layer count
     to the method's static preset.
@@ -68,11 +68,11 @@ def get_random_scheme(
 
 
 def select_layers_telemetry(
-    layer_signals: List[Dict[str, Any]],
+    layer_signals: list[dict[str, Any]],
     model_name: str,
     method: str,
-    total_layers: Optional[int] = None,
-) -> List[int]:
+    total_layers: int | None = None,
+) -> list[int]:
     """
     Frozen telemetry-guided selection policy.
     Uses only baseline probe signals (cosine similarity between MLP input and output).
@@ -88,13 +88,21 @@ def select_layers_telemetry(
     signal_map = {}
     for signal in layer_signals:
         layer = signal.get("layer")
-        if isinstance(layer, bool) or not isinstance(layer, int) or not 0 <= layer < n_layers:
+        if (
+            isinstance(layer, bool)
+            or not isinstance(layer, int)
+            or not 0 <= layer < n_layers
+        ):
             raise ValueError(f"Invalid telemetry layer: {layer}")
         if layer in signal_map:
             raise ValueError(f"Duplicate telemetry layer: {layer}")
         cosine = signal.get("cosine_similarity")
-        if (isinstance(cosine, bool) or not isinstance(cosine, (int, float))
-                or not math.isfinite(cosine) or abs(cosine) > 1.000001):
+        if (
+            isinstance(cosine, bool)
+            or not isinstance(cosine, (int, float))
+            or not math.isfinite(cosine)
+            or abs(cosine) > 1.000001
+        ):
             raise ValueError(f"Missing or invalid cosine similarity at layer {layer}.")
         signal_map[layer] = abs(cosine)
     missing = sorted(set(range(n_layers)) - signal_map.keys())
@@ -115,9 +123,7 @@ def select_layers_telemetry(
         best_start = 0
         min_sum = float("inf")
         for start in range(n_layers - window_size + 1):
-            window_sum = sum(
-                signal_map[start + j] for j in range(window_size)
-            )
+            window_sum = sum(signal_map[start + j] for j in range(window_size))
             if window_sum < min_sum:
                 min_sum = window_sum
                 best_start = start
